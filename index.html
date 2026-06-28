@@ -687,6 +687,24 @@
 
             // Start the progress on page load
             updateProgress();
+
+            // Also dismiss immediately when React signals ready (avoids double-loader)
+            window.__dismissSplash = function () {
+                if (isComplete) return;
+                isComplete = true;
+                progress = 100;
+                progressFill.style.width = '100%';
+                progressPercent.textContent = '100%';
+                progressMessage.textContent = 'Ready!';
+                loaderContainer.style.transition = 'opacity 0.4s';
+                loaderContainer.style.opacity = '0';
+                setTimeout(function () {
+                    if (loaderContainer.parentNode) loaderContainer.remove();
+                    document.body.style.display = '';
+                    document.body.style.justifyContent = '';
+                    document.body.style.alignItems = '';
+                }, 400);
+            };
         </script>
 
         <!-- LiveChat script -->
