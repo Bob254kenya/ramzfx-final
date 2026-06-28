@@ -12,6 +12,87 @@ const MIN_STRATEGY_LENGTH = 120;
 const MIN_RUNS_FOR_RATING = 3;
 const DEVELOPER_DISPLAY_NAME = 'Mr Duke';
 
+const tradingAdvice = [
+  "📈 The trend is your friend until the bend at the end",
+  "💡 Buy low, sell high - it's simple but not easy",
+  "🔥 Don't catch a falling knife - wait for confirmation",
+  "📊 Cut your losses short and let your profits run",
+  "⚡ Volatility is opportunity in disguise",
+  "🎯 Set your stop-loss and take-profit before entering",
+  "💎 Patience is the most valuable trading skill",
+  "🌊 Trade with the trend, not against it",
+  "📉 Fear and greed drive the market - master both",
+  "🚀 Diversification is your only free lunch",
+  "⏰ Time in the market beats timing the market",
+  "💪 Risk management > profit generation",
+  "📈 Never add to a losing position",
+  "🎲 Know your risk tolerance before you trade",
+  "🌟 The best trade is sometimes no trade",
+  "📊 Price action speaks louder than indicators",
+  "💡 Success is a poor teacher - learn from losses too",
+  "🔥 Don't fall in love with your positions",
+  "💎 Volatility creates wealth for the patient",
+  "📉 Market sentiment drives price more than fundamentals",
+  "⚡ Quick profits often lead to quick losses",
+  "🎯 Trade what you see, not what you think",
+  "🌟 Discipline beats intelligence every time",
+  "📈 The market rewards consistency, not luck",
+  "💡 Your worst trade is often your best teacher",
+  "📊 Always have an exit plan before entry",
+  "💪 Leverage is a double-edged sword",
+  "🔥 News trading is risky - wait for the dust to settle",
+  "🎲 Even a broken clock is right twice a day",
+  "📉 Greed expands and contracts in cycles",
+  "⚡ The first loss is your best loss",
+  "💎 Keep a trading journal - learn from every trade",
+  "📈 Buy the rumor, sell the news",
+  "🌟 Patience pays off in the long run",
+  "🔥 Don't overtrade - quality over quantity",
+  "💡 Technical analysis is a self-fulfilling prophecy",
+  "📊 The market is always right",
+  "💪 Protect your capital above all else",
+  "🎯 Have a strategy and stick to it",
+  "📉 Fear of missing out is expensive",
+  "⚡ Low volatility often precedes big moves",
+  "💎 Confidence comes from preparation, not ego",
+  "📈 The best trade is the one you don't regret",
+  "🌟 Successful trading is boring trading",
+  "🔥 Don't chase the market - let it come to you",
+  "💡 Know when to hold and when to fold",
+  "📊 Volume confirms price action",
+  "💪 Trading is 20% strategy and 80% psychology",
+  "🎲 Luck favors the prepared mind",
+  "📉 The market always gives you another chance",
+];
+
+const getRandomAdvice = () => {
+  const randomIndex = Math.floor(Math.random() * tradingAdvice.length);
+  return tradingAdvice[randomIndex];
+};
+
+const AdviceRotator = () => {
+  const [advice, setAdvice] = useState(getRandomAdvice());
+  const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setIsVisible(false);
+      setTimeout(() => {
+        setAdvice(getRandomAdvice());
+        setIsVisible(true);
+      }, 500);
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className={`advice-rotator ${isVisible ? 'advice-rotator--visible' : 'advice-rotator--hidden'}`}>
+      <span className="advice-rotator__text">{advice}</span>
+    </div>
+  );
+};
+
 const formatDate = (iso: string) => {
     try {
         return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -277,6 +358,11 @@ const BotIdeas = observer(() => {
     return (
         <div className='bot-ideas-page'>
             <div className='bot-ideas-page__inner'>
+                <div className='bot-ideas-page__header'>
+                    <h1 className='bot-ideas-page__title'>🤖 Community Bot Ideas</h1>
+                    <AdviceRotator />
+                </div>
+
                 <BotPitchForm onIdeaSubmitted={handleIdeaSubmitted} />
 
                 <section className='bi-ideas-list'>
