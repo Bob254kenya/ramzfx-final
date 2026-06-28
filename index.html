@@ -654,6 +654,9 @@
                         loaderContainer.style.opacity = '0';
                         setTimeout(() => {
                             loaderContainer.remove();
+                            document.body.style.display = '';
+                            document.body.style.justifyContent = '';
+                            document.body.style.alignItems = '';
                         }, 500);
                     }, 500);
                 }
