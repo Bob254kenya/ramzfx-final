@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en" dir="auto" class="dark">
+    <head>
+        <!-- Google Tag Manager -->
+        <script>
+            (function (w, d, s, l, i) {
+                w[l] = w[l] || [];
+                w[l].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
+                var f = d.getElementsByTagName(s)[0],
+                    j = d.createElement(s),
+                    dl = l != 'dataLayer' ? '&l=' + l : '';
+                j.async = true;
+                j.src = 'https://www.googletagmanager.com/gtm.js?id=' + i + dl;
+                f.parentNode.insertBefore(j, f);
+            })(window, document, 'script', 'dataLayer', 'GTM-KV9538TF');
+        </script>
+        <!-- End Google Tag Manager -->
+
+        <meta charset="UTF-8" />
+        <link rel="icon" type="image/svg+xml" href="/deriv-logo.svg" />
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="theme-color" content="#000000" />
+        <meta name="title" content="RAMZFX || YOUR ULTIMATE IN TRADING" />
+        <meta name="description" content="Web-based trading platform by Ramzfx" />
+        <meta property="og:title" content="Risk managers" />
+        <meta property="og:description" content="Web-based trading platform Ramzfx" />
+        <title>RAMZFX || YOUR ULTIMATE IN TRADING</title>
+        <style>
+            :root {
+                font-size: 62.5%;
+            }
+            /* ===== RESET & BASE ===== */
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+                background: #0a0a0a;
+                color: #ffffff;
+                height: 100vh;
+                overflow: hidden;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                user-select: none;
+                position: relative;
+            }
+
+            /* ===== TRADING WORDS BACKGROUND ===== */
+            .trading-bg {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                overflow: hidden;
+                z-index: 0;
+                pointer-events: none;
+                opacity: 0.15;
+            }
+
+            .trading-word {
+                position: absolute;
+                font-size: 14px;
+                font-weight: 600;
+                color: #4FC3F7;
+                text-transform: uppercase;
+                letter-spacing: 2px;
+                white-space: nowrap;
+                animation: floatWord linear infinite;
+                text-shadow: 0 0 20px rgba(79, 195, 247, 0.3);
+            }
+
+            .trading-word:nth-child(1) {
+                animation-duration: 25s;
+                top: 5%;
+                left: -10%;
+                font-size: 18px;
+            }
+            .trading-word:nth-child(2) {
+                animation-duration: 30s;
+                top: 15%;
+                left: -10%;
+                font-size: 12px;
+                animation-delay: -5s;
+                color: #64B5F6;
+            }
+            .trading-word:nth-child(3) {
+                animation-duration: 28s;
+                top: 25%;
+                left: -10%;
+                font-size: 22px;
+                animation-delay: -10s;
+            }
+            .trading-word:nth-child(4) {
+                animation-duration: 32s;
+                top: 35%;
+                left: -10%;
+                font-size: 16px;
+                animation-delay: -15s;
+                color: #42A5F5;
+            }
+            .trading-word:nth-child(5) {
+                animation-duration: 26s;
+                top: 45%;
+                left: -10%;
+                font-size: 20px;
+                animation-delay: -20s;
+            }
+            .trading-word:nth-child(6) {
+                animation-duration: 29s;
+                top: 55%;
+                left: -10%;
+                font-size: 14px;
+                animation-delay: -8s;
+                color: #64B5F6;
+            }
+            .trading-word:nth-child(7) {
+                animation-duration: 31s;
+                top: 65%;
+                left: -10%;
+                font-size: 24px;
+                animation-delay: -12s;
+            }
+            .trading-word:nth-child(8) {
+                animation-duration: 27s;
+                top: 75%;
+                left: -10%;
+                font-size: 15px;
+                animation-delay: -18s;
+                color: #42A5F5;
+            }
+            .trading-word:nth-child(9) {
+                animation-duration: 33s;
+                top: 85%;
+                left: -10%;
+                font-size: 19px;
+                animation-delay: -3s;
+            }
+            .trading-word:nth-child(10) {
+                animation-duration: 24s;
+                top: 92%;
+                left: -10%;
+                font-size: 13px;
+                animation-delay: -25s;
+                color: #64B5F6;
+            }
+
+            /* Second wave - from right to left */
+            .trading-word.right {
+                animation: floatWordRight linear infinite;
+                left: auto;
+                right: -10%;
+            }
+
+            .trading-word.right:nth-child(11) {
+                animation-duration: 28s;
+                top: 8%;
+                right: -10%;
+                font-size: 17px;
+                animation-delay: -6s;
+                color: #4FC3F7;
+            }
+            .trading-word.right:nth-child(12) {
+                animation-duration: 32s;
+                top: 20%;
+                right: -10%;
+                font-size: 21px;
+                animation-delay: -14s;
+            }
+            .trading-word.right:nth-child(13) {
+                animation-duration: 26s;
+                top: 32%;
+                right: -10%;
+                font-size: 13px;
+                animation-delay: -22s;
+                color: #42A5F5;
+            }
+            .trading-word.right:nth-child(14) {
+                animation-duration: 30s;
+                top: 44%;
+                right: -10%;
+                font-size: 23px;
+                animation-delay: -9s;
+            }
+            .trading-word.right:nth-child(15) {
+                animation-duration: 29s;
+                top: 56%;
+                right: -10%;
+                font-size: 16px;
+                animation-delay: -17s;
+                color: #64B5F6;
+            }
+            .trading-word.right:nth-child(16) {
+                animation-duration: 34s;
+                top: 68%;
+                right: -10%;
+                font-size: 19px;
+                animation-delay: -4s;
+            }
+            .trading-word.right:nth-child(17) {
+                animation-duration: 27s;
+                top: 80%;
+                right: -10%;
+                font-size: 14px;
+                animation-delay: -20s;
+                color: #4FC3F7;
+            }
+            .trading-word.right:nth-child(18) {
+                animation-duration: 31s;
+                top: 90%;
+                right: -10%;
+                font-size: 22px;
+                animation-delay: -11s;
+            }
+
+            @keyframes floatWord {
+                0% {
+                    transform: translateX(0) rotate(0deg);
+                    opacity: 0;
+                }
+                5% {
+                    opacity: 1;
+                }
+                90% {
+                    opacity: 1;
+                }
+                100% {
+                    transform: translateX(calc(100vw + 200px)) rotate(3deg);
+                    opacity: 0;
+                }
+            }
+
+            @keyframes floatWordRight {
+                0% {
+                    transform: translateX(0) rotate(0deg);
+                    opacity: 0;
+                }
+                5% {
+                    opacity: 1;
+                }
+                90% {
+                    opacity: 1;
+                }
+                100% {
+                    transform: translateX(calc(-100vw - 200px)) rotate(-3deg);
+                    opacity: 0;
+                }
+            }
+
+            /* ===== LOADER CONTAINER ===== */
+            .loader-container {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                gap: 30px;
+                padding: 20px;
+                width: 100%;
+                max-width: 400px;
+                animation: fadeIn 0.5s ease-out;
+                position: relative;
+                z-index: 1;
+                background: rgba(10, 10, 10, 0.7);
+                backdrop-filter: blur(10px);
+                border-radius: 24px;
+                border: 1px solid rgba(79, 195, 247, 0.1);
+                box-shadow: 0 0 60px rgba(79, 195, 247, 0.05);
+            }
+
+            /* ===== LOGO / BRAND ===== */
+            .brand {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .brand-icon {
+                width: 80px;
+                height: 80px;
+                background: linear-gradient(135deg, #1a237e, #0d47a1);
+                border-radius: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 40px;
+                font-weight: 800;
+                color: #4FC3F7;
+                box-shadow: 0 8px 32px rgba(79, 195, 247, 0.3);
+                animation: pulse 2s ease-in-out infinite;
+                border: 2px solid rgba(79, 195, 247, 0.2);
+            }
+
+            .brand-name {
+                font-size: 28px;
+                font-weight: 700;
+                background: linear-gradient(135deg, #4FC3F7, #f44336);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                letter-spacing: 1px;
+            }
+
+            .brand-sub {
+                font-size: 12px;
+                color: #4FC3F7;
+                letter-spacing: 4px;
+                text-transform: uppercase;
+                opacity: 0.7;
+            }
+
+            /* ===== SPINNER ===== */
+            .spinner-wrapper {
+                position: relative;
+                width: 120px;
+                height: 120px;
+            }
+
+            .spinner {
+                width: 120px;
+                height: 120px;
+                border-radius: 50%;
+                border: 4px solid rgba(79, 195, 247, 0.1);
+                border-top: 4px solid #4FC3F7;
+                border-right: 4px solid #f44336;
+                animation: spin 1s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+                box-shadow: 0 0 40px rgba(79, 195, 247, 0.1);
+            }
+
+            /* ===== PROGRESS BAR ===== */
+            .progress-wrapper {
+                width: 100%;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .progress-track {
+                width: 100%;
+                height: 12px;
+                background: rgba(79, 195, 247, 0.05);
+                border-radius: 6px;
+                overflow: hidden;
+                position: relative;
+                border: 1px solid rgba(79, 195, 247, 0.05);
+            }
+
+            .progress-fill {
+                height: 100%;
+                width: 0%;
+                background: linear-gradient(90deg, #1a237e, #4FC3F7, #f44336, #4FC3F7, #1a237e);
+                background-size: 400% 100%;
+                border-radius: 6px;
+                transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+                animation: shimmer 2s infinite;
+                box-shadow: 0 0 20px rgba(79, 195, 247, 0.3);
+            }
+
+            .progress-label {
+                display: flex;
+                justify-content: space-between;
+                font-size: 12px;
+                color: #888;
+            }
+
+            .progress-percent {
+                font-weight: 600;
+                color: #4FC3F7;
+                font-variant-numeric: tabular-nums;
+            }
+
+            /* ===== MESSAGE ===== */
+            .message {
+                font-size: 14px;
+                color: #666;
+                text-align: center;
+                min-height: 24px;
+                transition: opacity 0.3s;
+            }
+
+            .message .highlight {
+                color: #4FC3F7;
+            }
+
+            /* ===== DOTS ANIMATION ===== */
+            .dots::after {
+                content: '';
+                animation: dots 1.5s steps(4, end) infinite;
+            }
+
+            /* ===== KEYFRAMES ===== */
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+
+            @keyframes pulse {
+                0%,
+                100% {
+                    transform: scale(1);
+                }
+                50% {
+                    transform: scale(1.05);
+                }
+            }
+
+            @keyframes shimmer {
+                0% {
+                    background-position: 400% 0;
+                }
+                100% {
+                    background-position: -400% 0;
+                }
+            }
+
+            @keyframes fadeIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(20px) scale(0.95);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0) scale(1);
+                }
+            }
+
+            @keyframes dots {
+                0% {
+                    content: '';
+                }
+                25% {
+                    content: '.';
+                }
+                50% {
+                    content: '..';
+                }
+                75% {
+                    content: '...';
+                }
+                100% {
+                    content: '';
+                }
+            }
+
+            /* ===== RESPONSIVE ===== */
+            @media (max-width: 480px) {
+                .brand-icon {
+                    width: 60px;
+                    height: 60px;
+                    font-size: 30px;
+                }
+
+                .brand-name {
+                    font-size: 22px;
+                }
+
+                .spinner-wrapper {
+                    width: 90px;
+                    height: 90px;
+                }
+
+                .spinner {
+                    width: 90px;
+                    height: 90px;
+                }
+
+                .loader-container {
+                    gap: 24px;
+                    padding: 16px;
+                    margin: 16px;
+                    backdrop-filter: blur(20px);
+                }
+
+                .trading-word {
+                    font-size: 10px !important;
+                }
+            }
+
+            /* ===== SUCCESS STATE ===== */
+            .loader-container.success .spinner {
+                border-color: #4FC3F7;
+                animation: none;
+                transform: scale(0.8);
+                opacity: 0;
+            }
+
+            .loader-container.success .progress-fill {
+                width: 100% !important;
+                background: linear-gradient(90deg, #1a237e, #4FC3F7, #f44336) !important;
+            }
+
+            .loader-container.success .brand-icon {
+                background: linear-gradient(135deg, #1a237e, #0d47a1);
+                border-color: #4FC3F7;
+                animation: successPulse 0.5s ease-out;
+            }
+
+            @keyframes successPulse {
+                0% {
+                    transform: scale(1);
+                }
+                50% {
+                    transform: scale(1.2);
+                }
+                100% {
+                    transform: scale(1);
+                }
+            }
+
+            /* ===== GLOW EFFECT ===== */
+            .glow {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 200px;
+                height: 200px;
+                background: radial-gradient(circle, rgba(79, 195, 247, 0.05), transparent 70%);
+                border-radius: 50%;
+                pointer-events: none;
+                animation: pulseGlow 3s ease-in-out infinite;
+            }
+
+            @keyframes pulseGlow {
+                0%,
+                100% {
+                    transform: translate(-50%, -50%) scale(1);
+                    opacity: 0.5;
+                }
+                50% {
+                    transform: translate(-50%, -50%) scale(1.2);
+                    opacity: 1;
+                }
+            }
+        </style>
+    </head>
+
+    <body class="body theme theme--dark">
+        <!-- ===== TRADING WORDS BACKGROUND ===== -->
+        <div class="trading-bg">
+            <!-- Left to right -->
+            <div class="trading-word">📈 BUY</div>
+            <div class="trading-word">📊 SELL</div>
+            <div class="trading-word">💰 PROFIT</div>
+            <div class="trading-word">📉 TRADE</div>
+            <div class="trading-word">⚡ BULLISH</div>
+            <div class="trading-word">📈 FOREX</div>
+            <div class="trading-word">💹 STOCKS</div>
+            <div class="trading-word">📊 CRYPTO</div>
+            <div class="trading-word">🎯 TARGET</div>
+            <div class="trading-word">📈 GAIN</div>
+            <!-- Right to left -->
+            <div class="trading-word right">🔽 BEARISH</div>
+            <div class="trading-word right">📊 INDEX</div>
+            <div class="trading-word right">💎 DIAMOND</div>
+            <div class="trading-word right">📈 BULL</div>
+            <div class="trading-word right">📉 BEAR</div>
+            <div class="trading-word right">⚡ MOMENTUM</div>
+            <div class="trading-word right">💰 WEALTH</div>
+            <div class="trading-word right">📊 ANALYSIS</div>
+        </div>
+
+        <!-- ===== LOADER ===== -->
+        <div class="loader-container" id="loader">
+            <!-- Glow Effect -->
+            <div class="glow"></div>
+
+            <!-- Brand -->
+            <div class="brand">
+                <div class="brand-icon">R</div>
+                <div class="brand-name">RamzFX</div>
+                <div class="brand-sub">Trading Bot</div>
+            </div>
+
+            <!-- Spinner -->
+            <div class="spinner-wrapper">
+                <div class="spinner"></div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="progress-wrapper">
+                <div class="progress-track">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-label">
+                    <span id="progressMessage">Initializing...</span>
+                    <span class="progress-percent" id="progressPercent">0%</span>
+                </div>
+            </div>
+
+            <!-- Message -->
+            <div class="message" id="message">
+                <span class="highlight">RamzFX</span> is getting ready<span class="dots"></span>
+            </div>
+        </div>
+
+        <div id="modal_root" class="modal-root"></div>
+        <div id="popup_root" class="popup-root"></div>
+        <div id="root"></div>
+        <script type="text/javascript">
+            // ============================================================
+            // CONFIGURATION
+            // ============================================================
+            const CONFIG = {
+                totalSteps: 100,
+                stepDuration: 50, // 5 seconds total (100 steps * 50ms)
+                messages: [
+                    'Connecting to market...',
+                    'Analyzing trends...',
+                    'Loading strategies...',
+                    'Syncing data...',
+                    'Preparing charts...',
+                    'Connecting to server...',
+                    'Loading dashboard...',
+                    'Almost ready...'
+                ]
+            };
+
+            // ============================================================
+            // DOM REFS
+            // ============================================================
+            const progressFill = document.getElementById('progressFill');
+            const progressPercent = document.getElementById('progressPercent');
+            const progressMessage = document.getElementById('progressMessage');
+            const messageEl = document.getElementById('message');
+            const loaderContainer = document.getElementById('loader');
+
+            // ============================================================
+            // STATE
+            // ============================================================
+            let progress = 0;
+            let isComplete = false;
+
+            // ============================================================
+            // MAIN PROGRESS FUNCTION
+            // ============================================================
+            function updateProgress() {
+                if (isComplete) return;
+
+                // Increment progress smoothly
+                progress += 2;
+                if (progress >= 100) {
+                    progress = 100;
+                    isComplete = true;
+                    setTimeout(() => {
+                        loaderContainer.style.opacity = '0';
+                        setTimeout(() => {
+                            loaderContainer.remove();
+                        }, 500);
+                    }, 500);
+                }
+
+                // Update progress bar
+                progressFill.style.width = progress + '%';
+                progressPercent.textContent = Math.round(progress) + '%';
+
+                // Update message based on progress
+                const msgIndex = Math.floor((progress / 100) * CONFIG.messages.length);
+                if (msgIndex < CONFIG.messages.length) {
+                    progressMessage.textContent = CONFIG.messages[Math.min(msgIndex, CONFIG.messages.length - 1)];
+                }
+
+                // Update bottom message with dots effect
+                if (progress < 100) {
+                    const dots = '.'.repeat(Math.floor((progress / 100) * 3) % 4);
+                    messageEl.innerHTML = `
+                        <span class="highlight">RamzFX</span> is getting ready${dots}
+                    `;
+                }
+
+                // Schedule next update (exactly 5 seconds total)
+                if (!isComplete) {
+                    setTimeout(updateProgress, CONFIG.stepDuration);
+                }
+            }
+
+            // Start the progress on page load
+            updateProgress();
+        </script>
+
+        <!-- LiveChat script -->
+        <script type="text/javascript" defer>
+            window.__lc.license = 12049137;
+            window.__lc.asyncInit = true;
+            (function (n, t, c) {
+                function i(n) {
+                    return e._h ? e._h.apply(null, n) : e._q.push(n);
+                }
+                var e = {
+                    _q: [],
+                    _h: null,
+                    _v: '2.0',
+                    on: function () {
+                        i(['on', c.call(arguments)]);
+                    },
+                    once: function () {
+                        i(['once', c.call(arguments)]);
+                    },
+                    off: function () {
+                        i(['off', c.call(arguments)]);
+                    },
+                    get: function () {
+                        if (!e._h) throw new Error('[LiveChatWidget] You can’t use getters before load.');
+                        return i(['get', c.call(arguments)]);
+                    },
+                    call: function () {
+                        i(['call', c.call(arguments)]);
+                    },
+                    init: function () {
+                        setTimeout(() => {
+                            var n = t.createElement('script');
+                            ((n.async = !0),
+                                (n.type = 'text/javascript'),
+                                (n.src = 'https://cdn.livechatinc.com/tracking.js'),
+                                t.head.appendChild(n));
+                        }, 3000);
+                    },
+                };
+                (!n.__lc.asyncInit && e.init(), (n.LiveChatWidget = n.LiveChatWidget || e));
+            })(window, document, [].slice);
+        </script>
+        <!-- End LiveChat script -->
+    </body>
+</html>

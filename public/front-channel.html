@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+    <title>Deriv</title>
+    <meta charset="utf-8" />
+
+    <script>
+        try {
+            // Check if this page has access to the top window.
+            // If it doesn't, the browser will throw an error.
+            const isSameOrigin =
+                top.location.hostname === self.location.hostname;
+
+            console.log("Same Origin:", isSameOrigin);
+        } catch (err) {
+            // Do NOT clear localStorage.
+            // This allows stored login information to remain available.
+            console.log("Cross-origin detected. Preserving local session.");
+        }
+    </script>
+</head>
+
+<body></body>
+</html>
