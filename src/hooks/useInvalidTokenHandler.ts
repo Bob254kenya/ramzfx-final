@@ -15,7 +15,8 @@ export const useInvalidTokenHandler = (): { unregisterHandler: () => void } => {
     const handleInvalidToken = async () => {
         try {
             // Clear invalid session data to prevent infinite reload loop
-            sessionStorage.removeItem('auth_info');
+            localStorage.removeItem('auth_info');
+            localStorage.removeItem('deriv_accounts');
             localStorage.removeItem('active_loginid');
             localStorage.removeItem('authToken');
             localStorage.removeItem('accountsList');
