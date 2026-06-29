@@ -487,7 +487,7 @@ const AppWrapper = observer(() => {
                                 label={
                                     <>
                                         <LabelPairedCircleStarCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
-                                        <Localize i18n_default_text='Free Bots' />
+                                        <Localize i18n_default_text='Ramzfx Best Bots' />
                                     </>
                                 }
                                 id='id-best-bots'
@@ -519,7 +519,7 @@ const AppWrapper = observer(() => {
                                     label={
                                         <>
                                             <LabelPairedChartTrendUpCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
-                                            <Localize i18n_default_text='Ramzfx Ultimate Bot' />
+                                            <Localize i18n_default_text='Ramzfx Ultimate Recovery Bot/>
                                         </>
                                     }
                                     id='id-auto-trades'
@@ -545,7 +545,7 @@ const AppWrapper = observer(() => {
                                     label={
                                         <>
                                             <LabelPairedSearchCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
-                                            <Localize i18n_default_text='ProScanner Tool' />
+                                            <Localize i18n_default_text='Aì Scanner Tool' />
                                         </>
                                     }
                                     id='id-scanner'
