@@ -46,7 +46,7 @@ export class OAuthTokenExchangeService {
      */
     static getAuthInfo(): AuthInfo | null {
         try {
-            const authInfoStr = sessionStorage.getItem('auth_info');
+            const authInfoStr = localStorage.getItem('auth_info');
             if (!authInfoStr) {
                 return null;
             }
@@ -70,7 +70,7 @@ export class OAuthTokenExchangeService {
      * Clear authentication info from sessionStorage
      */
     static clearAuthInfo(): void {
-        sessionStorage.removeItem('auth_info');
+        localStorage.removeItem('auth_info');
     }
 
     /**
@@ -200,7 +200,7 @@ export class OAuthTokenExchangeService {
                 }
 
                 // Store as JSON string
-                sessionStorage.setItem('auth_info', JSON.stringify(authInfo));
+                localStorage.setItem('auth_info', JSON.stringify(authInfo));
 
                 // Immediately fetch accounts and initialize WebSocket after token exchange
                 try {
@@ -324,7 +324,7 @@ export class OAuthTokenExchangeService {
                 }
 
                 // Store updated auth info
-                sessionStorage.setItem('auth_info', JSON.stringify(authInfo));
+                localStorage.setItem('auth_info', JSON.stringify(authInfo));
             }
 
             return data;
@@ -336,4 +336,4 @@ export class OAuthTokenExchangeService {
             };
         }
     }
-}
+    }
