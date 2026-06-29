@@ -73,7 +73,7 @@ export class DerivWSAccountsService {
      * @param accounts Array of DerivAccount objects
      */
     static storeAccounts(accounts: DerivAccount[]): void {
-        sessionStorage.setItem('deriv_accounts', JSON.stringify(accounts));
+        localStorage.setItem('deriv_accounts', JSON.stringify(accounts));
     }
 
     /**
@@ -82,7 +82,7 @@ export class DerivWSAccountsService {
      */
     static getStoredAccounts(): DerivAccount[] | null {
         try {
-            const accountsStr = sessionStorage.getItem('deriv_accounts');
+            const accountsStr = localStorage.getItem('deriv_accounts');
             if (!accountsStr) {
                 return null;
             }
@@ -109,7 +109,7 @@ export class DerivWSAccountsService {
      * Clears stored accounts from sessionStorage
      */
     static clearStoredAccounts(): void {
-        sessionStorage.removeItem('deriv_accounts');
+        localStorage.removeItem('deriv_accounts');
     }
 
     /**
@@ -275,4 +275,4 @@ export class DerivWSAccountsService {
             throw error;
         }
     }
-}
+            }
