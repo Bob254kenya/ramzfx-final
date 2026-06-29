@@ -138,9 +138,9 @@ class APIBase {
         // If no account_id in localStorage, check sessionStorage for accounts
         if (!activeAccountId) {
             try {
-                const storedAccounts = sessionStorage.getItem('deriv_accounts');
+                const storedAccounts = localStorage.getItem('deriv_accounts');
                 console.log(
-                    '[handleTokenExchangeIfNeeded] Checking sessionStorage for deriv_accounts:',
+                    '[handleTokenExchangeIfNeeded] Checking localStorage for deriv_accounts:',
                     !!storedAccounts
                 );
                 if (storedAccounts) {
@@ -282,19 +282,12 @@ class APIBase {
             this.reconnection_attempts += 1;
 
             if (this.reconnection_attempts >= this.MAX_RECONNECTION_ATTEMPTS) {
-                // Reset reconnection counter
+                // Reset the counter so we keep quietly retrying in the background.
+                // IMPORTANT: a dropped connection / failed reconnect attempt (e.g. the
+                // user's internet went off, or the tab was backgrounded) is NOT the same
+                // as an invalid session. We must not log the user out here - only an
+                // explicit auth error from the server (handled elsewhere) should do that.
                 this.reconnection_attempts = 0;
-
-                // Properly handle logout through the API
-                setIsAuthorized(false);
-                setAccountList([]);
-                setAuthData(null);
-
-                // Clear necessary storage items
-                localStorage.removeItem('active_loginid');
-                localStorage.removeItem('account_type');
-                localStorage.removeItem('accountsList');
-                localStorage.removeItem('clientAccounts');
             }
 
             this.init(true);
