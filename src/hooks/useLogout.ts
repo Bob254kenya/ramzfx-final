@@ -22,10 +22,9 @@ export const useLogout = () => {
             // If logout fails, clear only auth-related storage keys
             // This preserves user preferences (theme, language, etc.) while ensuring auth data is cleared
             try {
-                // Clear auth-related sessionStorage items
-                sessionStorage.removeItem('auth_info');
-
                 // Clear auth-related localStorage items
+                localStorage.removeItem('auth_info');
+                localStorage.removeItem('deriv_accounts');
                 clearApiTokenSession();
                 localStorage.removeItem('active_loginid');
                 localStorage.removeItem('authToken');
