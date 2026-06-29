@@ -69,6 +69,119 @@ const SocialPopup: React.FC = () => {
                     transform: translateX(0);
                 }
             }
+            
+            .social-popup {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                z-index: 9999;
+                animation: slideInRight 0.5s ease-out;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+            
+            .social-content {
+                background: linear-gradient(135deg, #1a1a2e, #16213e);
+                border-radius: 16px;
+                padding: 30px;
+                min-width: 320px;
+                max-width: 400px;
+                width: 100%;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+                border: 1px solid rgba(200, 164, 93, 0.3);
+                position: relative;
+                text-align: center;
+            }
+            
+            .social-content h3 {
+                color: #c8a45d;
+                font-size: 20px;
+                font-weight: 700;
+                margin: 0 0 20px 0;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+                font-family: 'Arial', sans-serif;
+            }
+            
+            .social-close {
+                position: absolute;
+                top: 12px;
+                right: 16px;
+                background: none;
+                border: none;
+                color: #888;
+                font-size: 22px;
+                cursor: pointer;
+                padding: 4px 8px;
+                border-radius: 50%;
+                transition: all 0.3s ease;
+                line-height: 1;
+            }
+            
+            .social-close:hover {
+                color: #fff;
+                background: rgba(255, 255, 255, 0.1);
+                transform: rotate(90deg);
+            }
+            
+            .social-links {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                align-items: center;
+            }
+            
+            .social-links a {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+                color: #ffffff;
+                text-decoration: none;
+                font-size: 18px;
+                font-weight: 500;
+                padding: 12px 20px;
+                width: 100%;
+                border-radius: 10px;
+                background: rgba(255, 255, 255, 0.05);
+                transition: all 0.3s ease;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                font-family: 'Arial', sans-serif;
+                letter-spacing: 0.5px;
+            }
+            
+            .social-links a:hover {
+                background: rgba(200, 164, 93, 0.15);
+                border-color: #c8a45d;
+                transform: translateX(5px);
+                box-shadow: 0 4px 15px rgba(200, 164, 93, 0.2);
+            }
+            
+            .social-links a .social-icon {
+                font-size: 24px;
+                min-width: 30px;
+            }
+            
+            /* Responsive for mobile */
+            @media (max-width: 768px) {
+                .social-popup {
+                    bottom: 10px;
+                    right: 10px;
+                    left: 10px;
+                }
+                
+                .social-content {
+                    min-width: unset;
+                    max-width: 100%;
+                    padding: 20px;
+                }
+                
+                .social-links a {
+                    font-size: 16px;
+                    padding: 10px 16px;
+                }
+            }
         `;
         document.head.appendChild(styleSheet);
         
@@ -98,18 +211,61 @@ const SocialPopup: React.FC = () => {
                     className="social-close"
                     onClick={handleClose}
                     type="button"
+                    aria-label="Close social popup"
                 >
                     ✕
                 </button>
                 <h3>CONNECT WITH US</h3>
                 <div className="social-links">
-                    <a href="#" onClick={(e) => handleLinkClick(e, "https://wa.me/+254757261120")}>📱 WhatsApp</a>
-                    <a href="#" onClick={(e) => handleLinkClick(e, "https://t.me/+YDUwvuuVDYg5NjE0")}>✈️ Telegram</a>
-                    <a href="#" onClick={(e) => handleLinkClick(e, "https://www.youtube.com/@ceoramz")}>▶️ YouTube</a>
-                    <a href="#" onClick={(e) => handleLinkClick(e, "https://tiktok.com/@ceoramz")}>🎵 TikTok</a>
-                    <a href="#" onClick={(e) => handleLinkClick(e, "https://www.instagram.com/ramztrader.site")}>📷 Instagram</a>
-                    <a href="#" onClick={(e) => handleLinkClick(e, "https://www.facebook.com/profile.php?id=61573399294689")}>💬 Discord</a>
-                    <a href="#" onClick={(e) => handleLinkClick(e, "https://www.instagram.com/ramztrader.site")}>🐦 Twitter</a>
+                    <a 
+                        href="#" 
+                        onClick={(e) => handleLinkClick(e, "https://wa.me/+254757261120")}
+                        className="social-link"
+                    >
+                        <span className="social-icon">📱</span> WhatsApp
+                    </a>
+                    <a 
+                        href="#" 
+                        onClick={(e) => handleLinkClick(e, "https://t.me/+YDUwvuuVDYg5NjE0")}
+                        className="social-link"
+                    >
+                        <span className="social-icon">✈️</span> Telegram
+                    </a>
+                    <a 
+                        href="#" 
+                        onClick={(e) => handleLinkClick(e, "https://www.youtube.com/@ceoramz")}
+                        className="social-link"
+                    >
+                        <span className="social-icon">▶️</span> YouTube
+                    </a>
+                    <a 
+                        href="#" 
+                        onClick={(e) => handleLinkClick(e, "https://tiktok.com/@ceoramz")}
+                        className="social-link"
+                    >
+                        <span className="social-icon">🎵</span> TikTok
+                    </a>
+                    <a 
+                        href="#" 
+                        onClick={(e) => handleLinkClick(e, "https://www.instagram.com/ramztrader.site")}
+                        className="social-link"
+                    >
+                        <span className="social-icon">📷</span> Instagram
+                    </a>
+                    <a 
+                        href="#" 
+                        onClick={(e) => handleLinkClick(e, "https://www.facebook.com/profile.php?id=61590762970340")}
+                        className="social-link"
+                    >
+                        <span className="social-icon">💬</span> Facebook
+                    </a>
+                    <a 
+                        href="#" 
+                        onClick={(e) => handleLinkClick(e, "https://www.instagram.com/ramztrader.site")}
+                        className="social-link"
+                    >
+                        <span className="social-icon">🐦</span> Twitter
+                    </a>
                 </div>
             </div>
         </div>
@@ -203,8 +359,6 @@ const AppWrapper = observer(() => {
         return hash_tab_index >= 0 && isMainTabVisible(hash_tab_index) ? hash_tab_index : DBOT_TABS.BEST_BOTS;
     };
     const active_hash_tab = GetHashedValue(active_tab);
-
-
 
     // Set up modal state change listener
     useEffect(() => {
@@ -475,7 +629,7 @@ const AppWrapper = observer(() => {
                                     label={
                                         <>
                                             <LabelPairedLightbulbCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
-                                            <Localize i18n_default_text='Ramzfx Strategies ' />
+                                            <Localize i18n_default_text='Ramzfx Strategies' />
                                         </>
                                     }
                                     id='id-bot-ideas'
@@ -519,7 +673,7 @@ const AppWrapper = observer(() => {
                                     label={
                                         <>
                                             <LabelPairedChartTrendUpCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
-                                            <Localize i18n_default_text='Ramzfx Ultimate Recovery Bot/>
+                                            <Localize i18n_default_text='Ramzfx Ultimate Recovery Bot'/>
                                         </>
                                     }
                                     id='id-auto-trades'
@@ -545,7 +699,7 @@ const AppWrapper = observer(() => {
                                     label={
                                         <>
                                             <LabelPairedSearchCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
-                                            <Localize i18n_default_text='Aì Scanner Tool' />
+                                            <Localize i18n_default_text='Aì Scanner Tool'/>
                                         </>
                                     }
                                     id='id-scanner'
