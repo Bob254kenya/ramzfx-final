@@ -224,6 +224,23 @@
     background: #eef1f4;
 }
 
+.speed-bot-recovery {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: #f7f8fb;
+    border: 1px solid #e2e5ea;
+    border-radius: 14px;
+    padding: 14px;
+}
+
+.speed-bot-hint {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #8a93a1;
+}
+
 .speed-bot-switch {
     position: relative;
     display: inline-flex;
