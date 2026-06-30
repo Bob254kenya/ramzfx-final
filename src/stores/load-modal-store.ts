@@ -9,6 +9,7 @@ import {
     saveWorkspaceToRecent,
 } from '@/external/bot-skeleton';
 import { inject_workspace_options, updateXmlValues } from '@/external/bot-skeleton/scratch/utils';
+import { injectMarketAnalyser } from '@/utils/market-analyser-injector';
 import { isDbotRTL } from '@/external/bot-skeleton/utils/workspace';
 import { TStores } from '@deriv/stores/types';
 import { localize } from '@deriv-com/translations';
@@ -23,6 +24,7 @@ export default class LoadModalStore {
     root_store: RootStore;
     core: TStores;
     imported_strategy_type = 'pending';
+    is_market_analyser_enabled = localStorage.getItem('ramzfx_market_analyser_enabled') !== 'false';
 
     constructor(root_store: RootStore, core: any) {
         makeObservable(this, {
@@ -38,6 +40,8 @@ export default class LoadModalStore {
             selected_strategy_id: observable,
             current_workspace_id: observable,
             upload_id: observable,
+            is_market_analyser_enabled: observable,
+            setMarketAnalyserEnabled: action.bound,
             preview_workspace: computed,
             selected_strategy: computed,
             tab_name: computed,
@@ -428,13 +432,24 @@ export default class LoadModalStore {
         return true;
     };
 
+    setMarketAnalyserEnabled = (enabled: boolean): void => {
+        this.is_market_analyser_enabled = enabled;
+        localStorage.setItem('ramzfx_market_analyser_enabled', String(enabled));
+    };
+
     readFile = (is_preview: boolean, drop_event: DragEvent, file: File): void => {
         const reader = new FileReader();
         const file_name = file?.name.replace(/\.[^/.]+$/, '') || '';
 
         reader.onload = action(async e => {
+            const raw_xml = e?.target?.result;
+            const xml_with_analyser =
+                typeof raw_xml === 'string' && this.is_market_analyser_enabled
+                    ? injectMarketAnalyser(raw_xml)
+                    : raw_xml;
+
             const load_options = {
-                block_string: e?.target?.result,
+                block_string: xml_with_analyser,
                 drop_event,
                 from: save_types.LOCAL,
                 workspace: null as window.Blockly.WorkspaceSvg | null,
@@ -539,4 +554,4 @@ export default class LoadModalStore {
         /* [AI] - Analytics event tracking removed - see migrate-docs/MONITORING_PACKAGES.md for re-implementation guide */
         /* [/AI] */
     };
-}
+    }
