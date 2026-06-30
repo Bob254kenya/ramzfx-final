@@ -547,4 +547,4 @@ export default class DashboardStore implements IDashboardStore {
             this.setActiveTour('');
         }
     };
-            }
+                }
