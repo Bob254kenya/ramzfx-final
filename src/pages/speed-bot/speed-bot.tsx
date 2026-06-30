@@ -3,7 +3,16 @@ import { observer } from 'mobx-react-lite';
 import { DBOT_TABS } from '@/constants/bot-contents';
 import { api_base, MessageTypes } from '@/external/bot-skeleton';
 import { useStore } from '@/hooks/useStore';
-import { SUPPORTED_VOLATILITY_MARKETS } from '@/utils/digit-strategy';
+import {
+    buildMarketRecommendation,
+    calculateDigitPercentagesFromDigits,
+    compareOwnStrategy,
+    DIGIT_STRATEGIES,
+    evaluateDigitStrategy,
+    SUPPORTED_VOLATILITY_MARKETS,
+    TDigitContractType,
+    TOwnStrategy,
+} from '@/utils/digit-strategy';
 import { getLastDigitFromQuote, isExpectedStreamInterruption } from '@/utils/market-data';
 import { buyContractForUi, streamContractUntilSettled } from '@/utils/trade-purchase';
 import { safeSubscribe } from '@/utils/websocket-handler';
@@ -16,6 +25,21 @@ type TTickPoint = {
 };
 
 type TEvenOdd = 'Even' | 'Odd';
+// All tradeable contract types on the speed bot: digit contracts plus Rise/Fall.
+type TTradeType = TDigitContractType | 'Rise' | 'Fall';
+
+const BARRIER_CONTRACT_TYPES: TTradeType[] = ['Over', 'Under', 'Matches', 'Differs'];
+
+const CONTRACT_TYPE_CODE: Record<TTradeType, string> = {
+    Differs: 'DIGITDIFF',
+    Even: 'DIGITEVEN',
+    Fall: 'PUT',
+    Matches: 'DIGITMATCH',
+    Odd: 'DIGITODD',
+    Over: 'DIGITOVER',
+    Rise: 'CALL',
+    Under: 'DIGITUNDER',
+};
 
 const PATTERN_LENGTH = 20;
 const STATS_WINDOW = 100;
@@ -47,7 +71,10 @@ const SpeedBot = observer(() => {
     const showSpeedBot = active_tab === DBOT_TABS.SPEED_BOT;
 
     const [selectedSymbol, setSelectedSymbol] = useState(DEFAULT_SYMBOL);
-    const [tradeType, setTradeType] = useState<TEvenOdd>('Even');
+    const [tradeType, setTradeType] = useState<TTradeType>('Even');
+    const [barrierInput, setBarrierInput] = useState('5');
+    const [ownStrategyType, setOwnStrategyType] = useState<TDigitContractType>('Over');
+    const [ownStrategyBarrierInput, setOwnStrategyBarrierInput] = useState('2');
     const [ticks, setTicks] = useState<TTickPoint[]>([]);
     const [ticksInput, setTicksInput] = useState(DEFAULT_TICKS);
     const [stakeInput, setStakeInput] = useState(DEFAULT_STAKE);
@@ -72,7 +99,8 @@ const SpeedBot = observer(() => {
     const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const shouldStopRef = useRef(true);
 
-    const tradeTypeRef = useRef<TEvenOdd>(tradeType);
+    const tradeTypeRef = useRef<TTradeType>(tradeType);
+    const barrierRef = useRef(barrierInput);
     const alternateEvenOddRef = useRef(alternateEvenOdd);
     const alternateOnLossRef = useRef(alternateOnLoss);
     const useMartingaleRef = useRef(useMartingale);
@@ -92,6 +120,9 @@ const SpeedBot = observer(() => {
     useEffect(() => {
         tradeTypeRef.current = tradeType;
     }, [tradeType]);
+    useEffect(() => {
+        barrierRef.current = barrierInput;
+    }, [barrierInput]);
     useEffect(() => {
         alternateEvenOddRef.current = alternateEvenOdd;
     }, [alternateEvenOdd]);
@@ -136,6 +167,25 @@ const SpeedBot = observer(() => {
     const evenCount = digitsWindow.filter(digit => digit % 2 === 0).length;
     const evenPercent = totalCount ? (evenCount / totalCount) * 100 : 0;
     const oddPercent = totalCount ? 100 - evenPercent : 0;
+
+    // ==================== Research: all contract types ====================
+    // Builds a live recommendation across every digit-contract family (Even/Odd,
+    // Over/Under, Matches/Differs) from the same tick window, instead of only Even/Odd.
+    const digitPercentages = calculateDigitPercentagesFromDigits(digitsWindow);
+    const ownStrategyBarrierDigit = parseInt(ownStrategyBarrierInput, 10);
+    const marketRecommendation = buildMarketRecommendation(
+        digitPercentages,
+        Number.isFinite(parseInt(barrierInput, 10)) ? parseInt(barrierInput, 10) : 5
+    );
+    const researchSignals = (Object.keys(DIGIT_STRATEGIES) as Array<keyof typeof DIGIT_STRATEGIES>).map(strategyId => ({
+        strategyId,
+        ...evaluateDigitStrategy(strategyId, digitPercentages, digitsWindow),
+    }));
+    const ownStrategy: TOwnStrategy = {
+        barrier: Number.isFinite(ownStrategyBarrierDigit) ? ownStrategyBarrierDigit : undefined,
+        contractType: ownStrategyType,
+    };
+    const ownStrategyComparison = compareOwnStrategy(ownStrategy, marketRecommendation);
 
     // ==================== Tick stream ====================
 
@@ -285,26 +335,32 @@ const SpeedBot = observer(() => {
     // ==================== Trading ====================
 
     const buildTradeParameters = useCallback(
-        (type: TEvenOdd, stake: number, durationTicks: number) => ({
-            amount: stake,
-            basis: 'stake',
-            contract_type: type === 'Even' ? 'DIGITEVEN' : 'DIGITODD',
-            currency,
-            duration: durationTicks,
-            duration_unit: 't',
-            symbol: selectedSymbolRef.current,
-        }),
+        (type: TTradeType, stake: number, durationTicks: number, barrier: string) => {
+            const parameters: Record<string, any> = {
+                amount: stake,
+                basis: 'stake',
+                contract_type: CONTRACT_TYPE_CODE[type],
+                currency,
+                duration: durationTicks,
+                duration_unit: 't',
+                symbol: selectedSymbolRef.current,
+            };
+            if (BARRIER_CONTRACT_TYPES.includes(type)) {
+                parameters.barrier = barrier;
+            }
+            return parameters;
+        },
         [currency]
     );
 
     const runSingleTrade = useCallback(
-        async (type: TEvenOdd, stake: number, durationTicks: number): Promise<number> => {
+        async (type: TTradeType, stake: number, durationTicks: number, barrier: string): Promise<number> => {
             const symbol = selectedSymbolRef.current;
-            const contractTypeCode = type === 'Even' ? 'DIGITEVEN' : 'DIGITODD';
+            const contractTypeCode = CONTRACT_TYPE_CODE[type];
             const tradeStartTime = Math.floor(Date.now() / 1000);
 
             const buy = await buyContractForUi({
-                parameters: buildTradeParameters(type, stake, durationTicks),
+                parameters: buildTradeParameters(type, stake, durationTicks, barrier),
                 price: stake,
                 source: 'Speed Bot',
             });
@@ -390,7 +446,7 @@ const SpeedBot = observer(() => {
         sessionPnlRef.current = 0;
         setSessionPnl(0);
 
-        let currentType: TEvenOdd = autoAnalyzeRef.current ? analyzeAndPickTradeType() : tradeTypeRef.current;
+        let currentType: TTradeType = autoAnalyzeRef.current ? analyzeAndPickTradeType() : tradeTypeRef.current;
 
         while (!shouldStopRef.current) {
             // When auto-analysis is enabled, re-evaluate the last-tick analysis
@@ -404,7 +460,7 @@ const SpeedBot = observer(() => {
             setStatusMessage(`Trading ${currentType} with ${tradeStake.toFixed(2)} ${currency}...`);
 
             try {
-                const profit = await runSingleTrade(currentType, tradeStake, durationTicks);
+                const profit = await runSingleTrade(currentType, tradeStake, durationTicks, barrierRef.current);
                 if (shouldStopRef.current) break;
 
                 const won = profit > 0;
@@ -436,14 +492,23 @@ const SpeedBot = observer(() => {
                         }
                     }
 
-                    if (!autoAnalyzeRef.current && alternateOnLossRef.current) {
+                    // Alternating only makes sense for the Even/Odd pair; other contract types keep their selection.
+                    if (
+                        !autoAnalyzeRef.current &&
+                        alternateOnLossRef.current &&
+                        (currentType === 'Even' || currentType === 'Odd')
+                    ) {
                         currentType = currentType === 'Even' ? 'Odd' : 'Even';
                     }
                 }
 
                 // Alternate Even/Odd on every trade regardless of outcome (manual mode only;
                 // auto-analysis picks its own direction every iteration).
-                if (!autoAnalyzeRef.current && alternateEvenOddRef.current) {
+                if (
+                    !autoAnalyzeRef.current &&
+                    alternateEvenOddRef.current &&
+                    (currentType === 'Even' || currentType === 'Odd')
+                ) {
                     currentType = currentType === 'Even' ? 'Odd' : 'Even';
                 }
 
@@ -524,7 +589,7 @@ const SpeedBot = observer(() => {
 
         setIsTradeInFlight(true);
         try {
-            const profit = await runSingleTrade(type, stake, durationTicks);
+            const profit = await runSingleTrade(type, stake, durationTicks, barrierInput);
             sessionPnlRef.current = parseFloat((sessionPnlRef.current + profit).toFixed(8));
             setSessionPnl(sessionPnlRef.current);
             setTradeType(type);
@@ -536,7 +601,7 @@ const SpeedBot = observer(() => {
         } finally {
             setIsTradeInFlight(false);
         }
-    }, [analyzeAndPickTradeType, currency, isTradeInFlight, isTrading, runSingleTrade, stakeInput, ticksInput, tradeType]);
+    }, [analyzeAndPickTradeType, barrierInput, currency, isTradeInFlight, isTrading, runSingleTrade, stakeInput, ticksInput, tradeType]);
 
     useEffect(() => {
         if (!showSpeedBot) return undefined;
@@ -578,11 +643,39 @@ const SpeedBot = observer(() => {
                     className='speed-bot-select speed-bot-select--type'
                     value={tradeType}
                     disabled={isTrading || autoAnalyze}
-                    onChange={event => setTradeType(event.target.value as TEvenOdd)}
+                    onChange={event => setTradeType(event.target.value as TTradeType)}
                 >
-                    <option value='Even'>Even</option>
-                    <option value='Odd'>Odd</option>
+                    <optgroup label='Even / Odd'>
+                        <option value='Even'>Even</option>
+                        <option value='Odd'>Odd</option>
+                    </optgroup>
+                    <optgroup label='Over / Under'>
+                        <option value='Over'>Over</option>
+                        <option value='Under'>Under</option>
+                    </optgroup>
+                    <optgroup label='Matches / Differs'>
+                        <option value='Matches'>Matches</option>
+                        <option value='Differs'>Differs</option>
+                    </optgroup>
+                    <optgroup label='Rise / Fall'>
+                        <option value='Rise'>Rise</option>
+                        <option value='Fall'>Fall</option>
+                    </optgroup>
                 </select>
+
+                {BARRIER_CONTRACT_TYPES.includes(tradeType) && (
+                    <label className='speed-bot-field'>
+                        <span>
+                            <Localize i18n_default_text='Barrier Digit (0-9)' />
+                        </span>
+                        <input
+                            inputMode='numeric'
+                            value={barrierInput}
+                            disabled={isTrading}
+                            onChange={event => setBarrierInput(cleanIntegerInput(event.target.value).slice(0, 1))}
+                        />
+                    </label>
+                )}
 
                 <label className='speed-bot-toggle-row'>
                     <span>
@@ -598,6 +691,111 @@ const SpeedBot = observer(() => {
                         <span className='speed-bot-switch__knob' />
                     </span>
                 </label>
+
+                <div className='speed-bot-divider' />
+
+                {/* ==================== Research: all contract types ==================== */}
+                <div className='speed-bot-research'>
+                    <div className='speed-bot-research__title'>
+                        <Localize i18n_default_text='Research — All Contract Types' />
+                    </div>
+                    <div className='speed-bot-research__grid'>
+                        <div className='speed-bot-research__item'>
+                            <span>Even</span>
+                            <strong>{marketRecommendation.evenOdd.evenPercent.toFixed(1)}%</strong>
+                        </div>
+                        <div className='speed-bot-research__item'>
+                            <span>Odd</span>
+                            <strong>{marketRecommendation.evenOdd.oddPercent.toFixed(1)}%</strong>
+                        </div>
+                        <div className='speed-bot-research__item'>
+                            <span>Over {marketRecommendation.overUnder.barrier}</span>
+                            <strong>{marketRecommendation.overUnder.overPercent.toFixed(1)}%</strong>
+                        </div>
+                        <div className='speed-bot-research__item'>
+                            <span>Under {marketRecommendation.overUnder.barrier}</span>
+                            <strong>{marketRecommendation.overUnder.underPercent.toFixed(1)}%</strong>
+                        </div>
+                        <div className='speed-bot-research__item'>
+                            <span>
+                                <Localize i18n_default_text='Most likely digit' />
+                            </span>
+                            <strong>{marketRecommendation.matchesDiffers.mostLikelyDigit}</strong>
+                        </div>
+                        <div className='speed-bot-research__item'>
+                            <span>
+                                <Localize i18n_default_text='Least likely digit' />
+                            </span>
+                            <strong>{marketRecommendation.matchesDiffers.leastLikelyDigit}</strong>
+                        </div>
+                    </div>
+                    <div className='speed-bot-research__signals'>
+                        {researchSignals.map(signal => (
+                            <div
+                                key={signal.strategyId}
+                                className={`speed-bot-signal ${signal.entryReady ? 'speed-bot-signal--ready' : signal.isQualified ? 'speed-bot-signal--qualified' : ''}`}
+                            >
+                                <span>{signal.alertLabel}</span>
+                                <strong>
+                                    {signal.entryReady ? (
+                                        <Localize i18n_default_text='Entry Ready' />
+                                    ) : signal.isQualified ? (
+                                        <Localize i18n_default_text='Qualified' />
+                                    ) : (
+                                        <Localize i18n_default_text='Watching' />
+                                    )}
+                                </strong>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div className='speed-bot-divider' />
+
+                {/* ==================== Own strategy: match / differs ==================== */}
+                <div className='speed-bot-own-strategy'>
+                    <div className='speed-bot-own-strategy__title'>
+                        <Localize i18n_default_text='My Own Strategy' />
+                    </div>
+                    <div className='speed-bot-own-strategy__row'>
+                        <select
+                            className='speed-bot-select'
+                            value={ownStrategyType}
+                            onChange={event => setOwnStrategyType(event.target.value as TDigitContractType)}
+                        >
+                            <option value='Even'>Even</option>
+                            <option value='Odd'>Odd</option>
+                            <option value='Over'>Over</option>
+                            <option value='Under'>Under</option>
+                            <option value='Matches'>Matches</option>
+                            <option value='Differs'>Differs</option>
+                        </select>
+                        {(ownStrategyType === 'Over' ||
+                            ownStrategyType === 'Under' ||
+                            ownStrategyType === 'Matches' ||
+                            ownStrategyType === 'Differs') && (
+                            <input
+                                className='speed-bot-own-strategy__barrier'
+                                inputMode='numeric'
+                                value={ownStrategyBarrierInput}
+                                onChange={event => setOwnStrategyBarrierInput(cleanIntegerInput(event.target.value).slice(0, 1))}
+                            />
+                        )}
+                    </div>
+                    <div
+                        className={`speed-bot-own-strategy__badge ${
+                            ownStrategyComparison.matches ? 'speed-bot-own-strategy__badge--match' : 'speed-bot-own-strategy__badge--differ'
+                        }`}
+                    >
+                        {ownStrategyComparison.matches ? (
+                            <Localize i18n_default_text='Matches current market read' />
+                        ) : (
+                            <Localize i18n_default_text='Differs from current market read' />
+                        )}
+                        {' — '}
+                        <Localize i18n_default_text='Live read:' /> {ownStrategyComparison.recommendedPick}
+                    </div>
+                </div>
 
                 <div className='speed-bot-divider' />
 
