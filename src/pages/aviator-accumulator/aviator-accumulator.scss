@@ -6,7 +6,8 @@
     flex: 1 1 auto;
     justify-content: center;
     padding: 24px 16px 7% 16px;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     background: #f4f6f8;
 
     * {
@@ -16,16 +17,15 @@
 
 .aviator-layout {
     width: 100%;
-    max-width: 980px;
+    max-width: 100%;
     display: flex;
-    gap: 20px;
-    align-items: flex-start;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 16px;
+    align-items: stretch;
 }
 
 .aviator-main {
-    flex: 1 1 480px;
-    min-width: 320px;
+    width: 100%;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -73,6 +73,43 @@
     letter-spacing: 0.5px;
     text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
     z-index: 3;
+}
+
+.aviator-scene__live-price {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    z-index: 3;
+    background: rgba(6, 10, 22, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 6px 10px;
+}
+
+.aviator-scene__live-price-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.aviator-scene__live-price-quote {
+    font-size: 15px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.aviator-scene__live-price-quote--up {
+    color: #5be79b;
+}
+
+.aviator-scene__live-price-quote--down {
+    color: #ff7a96;
 }
 
 .aviator-jet-track {
@@ -379,9 +416,7 @@
 // ==================== Strategy panel ====================
 
 .aviator-panel {
-    flex: 1 1 320px;
-    min-width: 280px;
-    max-width: 360px;
+    width: 100%;
     background: #ffffff;
     border-radius: 20px;
     padding: 14px;
@@ -563,12 +598,8 @@
     background: linear-gradient(135deg, #e0335c, #b3263e);
 }
 
-@media (max-width: 760px) {
-    .aviator-layout {
+@media (max-width: 480px) {
+    .aviator-panel__section {
         flex-direction: column;
-    }
-
-    .aviator-panel {
-        max-width: 100%;
     }
 }
