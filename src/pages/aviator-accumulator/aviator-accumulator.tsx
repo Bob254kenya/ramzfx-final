@@ -28,10 +28,15 @@ type TVolatilitySnapshot = {
 
 const ACCUMULATOR_MARKETS = [
     { label: 'Volatility 10 (1s) Index', symbol: '1HZ10V' },
+    { label: 'Volatility 10 Index', symbol: 'R_10' },
     { label: 'Volatility 25 (1s) Index', symbol: '1HZ25V' },
+    { label: 'Volatility 25 Index', symbol: 'R_25' },
     { label: 'Volatility 50 (1s) Index', symbol: '1HZ50V' },
+    { label: 'Volatility 50 Index', symbol: 'R_50' },
     { label: 'Volatility 75 (1s) Index', symbol: '1HZ75V' },
+    { label: 'Volatility 75 Index', symbol: 'R_75' },
     { label: 'Volatility 100 (1s) Index', symbol: '1HZ100V' },
+    { label: 'Volatility 100 Index', symbol: 'R_100' },
 ];
 
 const GROWTH_RATES = [
@@ -52,7 +57,7 @@ const DEFAULT_MARTINGALE_TRIGGER = '1.10';
 const DEFAULT_MARTINGALE_FACTOR = '2';
 const DEFAULT_MAX_MARTINGALE_STEPS = '5';
 const DEFAULT_COMPOUND_PERCENT = '10';
-const MAX_HISTORY = 15;
+const MAX_HISTORY = 18; // fills a 3-column x 6-row grid
 const RESULT_PAUSE_MS = 1400;
 
 const cleanMoneyInput = (value: string) => value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
@@ -597,7 +602,7 @@ const AviatorAccumulator = observer(() => {
                     {/* ==================== Last 15 breakouts ==================== */}
                     <div className='aviator-history'>
                         <div className='aviator-history__title'>
-                            <Localize i18n_default_text='Last 15 Breakouts' />
+                            <Localize i18n_default_text='Last Breakouts' />
                         </div>
                         <div className='aviator-history__track'>
                             {history.length === 0 && (
@@ -742,91 +747,107 @@ const AviatorAccumulator = observer(() => {
 
                     <div className='aviator-divider' />
 
-                    <label className='aviator-toggle-row'>
-                        <span>
-                            <Localize i18n_default_text='Use Martingale on Early Breaks' />
-                        </span>
-                        <span className={`aviator-switch ${useMartingale ? 'aviator-switch--on' : ''}`}>
-                            <input
-                                type='checkbox'
-                                checked={useMartingale}
-                                disabled={isTrading}
-                                onChange={event => setUseMartingale(event.target.checked)}
-                            />
-                            <span className='aviator-switch__knob' />
-                        </span>
-                    </label>
-                    <p className='aviator-hint'>
-                        <Localize i18n_default_text='If a round breaks below the trigger multiplier, the next stake is multiplied by the Martingale Factor. Breaks above the trigger reset to base stake.' />
-                    </p>
+                    <details className='aviator-advanced'>
+                        <summary className='aviator-advanced__summary'>
+                            <Localize i18n_default_text='Advanced Settings' />
+                        </summary>
 
-                    <div className='aviator-panel__section'>
-                        <label className='aviator-field'>
-                            <span>
-                                <Localize i18n_default_text='Martingale Trigger (x)' />
-                            </span>
-                            <input
-                                inputMode='decimal'
-                                value={martingaleTriggerInput}
-                                disabled={isTrading || !useMartingale}
-                                onChange={event => setMartingaleTriggerInput(cleanMoneyInput(event.target.value))}
-                            />
-                        </label>
-                        <label className='aviator-field'>
-                            <span>
-                                <Localize i18n_default_text='Martingale Factor' />
-                            </span>
-                            <input
-                                inputMode='decimal'
-                                value={martingaleFactorInput}
-                                disabled={isTrading || !useMartingale}
-                                onChange={event => setMartingaleFactorInput(cleanMoneyInput(event.target.value))}
-                            />
-                        </label>
-                    </div>
+                        <div className='aviator-advanced__body'>
+                            <label className='aviator-toggle-row'>
+                                <span>
+                                    <Localize i18n_default_text='Use Martingale on Early Breaks' />
+                                </span>
+                                <span className={`aviator-switch ${useMartingale ? 'aviator-switch--on' : ''}`}>
+                                    <input
+                                        type='checkbox'
+                                        checked={useMartingale}
+                                        disabled={isTrading}
+                                        onChange={event => setUseMartingale(event.target.checked)}
+                                    />
+                                    <span className='aviator-switch__knob' />
+                                </span>
+                            </label>
+                            <p className='aviator-hint'>
+                                <Localize i18n_default_text='If a round breaks below the trigger multiplier, the next stake is multiplied by the Martingale Factor. Breaks above the trigger reset to base stake.' />
+                            </p>
 
-                    <label className='aviator-field'>
-                        <span>
-                            <Localize i18n_default_text='Max Consecutive Martingale Steps' />
-                        </span>
-                        <input
-                            inputMode='numeric'
-                            value={maxMartingaleStepsInput}
-                            disabled={isTrading || !useMartingale}
-                            onChange={event => setMaxMartingaleStepsInput(cleanIntegerInput(event.target.value))}
-                        />
-                    </label>
+                            <div className='aviator-panel__section'>
+                                <label className='aviator-field'>
+                                    <span>
+                                        <Localize i18n_default_text='Martingale Trigger (x)' />
+                                    </span>
+                                    <input
+                                        inputMode='decimal'
+                                        value={martingaleTriggerInput}
+                                        disabled={isTrading || !useMartingale}
+                                        onChange={event =>
+                                            setMartingaleTriggerInput(cleanMoneyInput(event.target.value))
+                                        }
+                                    />
+                                </label>
+                                <label className='aviator-field'>
+                                    <span>
+                                        <Localize i18n_default_text='Martingale Factor' />
+                                    </span>
+                                    <input
+                                        inputMode='decimal'
+                                        value={martingaleFactorInput}
+                                        disabled={isTrading || !useMartingale}
+                                        onChange={event =>
+                                            setMartingaleFactorInput(cleanMoneyInput(event.target.value))
+                                        }
+                                    />
+                                </label>
+                            </div>
 
-                    <div className='aviator-divider' />
+                            <label className='aviator-field'>
+                                <span>
+                                    <Localize i18n_default_text='Max Consecutive Martingale Steps' />
+                                </span>
+                                <input
+                                    inputMode='numeric'
+                                    value={maxMartingaleStepsInput}
+                                    disabled={isTrading || !useMartingale}
+                                    onChange={event =>
+                                        setMaxMartingaleStepsInput(cleanIntegerInput(event.target.value))
+                                    }
+                                />
+                            </label>
 
-                    <label className='aviator-field'>
-                        <span>
-                            <Localize i18n_default_text='Winning Strategy' />
-                        </span>
-                        <select
-                            className='aviator-select'
-                            value={winStrategy}
-                            disabled={isTrading}
-                            onChange={event => setWinStrategy(event.target.value as TWinStrategy)}
-                        >
-                            <option value='reset'>Reset to base stake after a win</option>
-                            <option value='compound'>Compound — grow stake after a win</option>
-                        </select>
-                    </label>
+                            <div className='aviator-divider' />
 
-                    {winStrategy === 'compound' && (
-                        <label className='aviator-field'>
-                            <span>
-                                <Localize i18n_default_text='Compound Growth (% of stake)' />
-                            </span>
-                            <input
-                                inputMode='decimal'
-                                value={compoundPercentInput}
-                                disabled={isTrading}
-                                onChange={event => setCompoundPercentInput(cleanMoneyInput(event.target.value))}
-                            />
-                        </label>
-                    )}
+                            <label className='aviator-field'>
+                                <span>
+                                    <Localize i18n_default_text='Winning Strategy' />
+                                </span>
+                                <select
+                                    className='aviator-select'
+                                    value={winStrategy}
+                                    disabled={isTrading}
+                                    onChange={event => setWinStrategy(event.target.value as TWinStrategy)}
+                                >
+                                    <option value='reset'>Reset to base stake after a win</option>
+                                    <option value='compound'>Compound — grow stake after a win</option>
+                                </select>
+                            </label>
+
+                            {winStrategy === 'compound' && (
+                                <label className='aviator-field'>
+                                    <span>
+                                        <Localize i18n_default_text='Compound Growth (% of stake)' />
+                                    </span>
+                                    <input
+                                        inputMode='decimal'
+                                        value={compoundPercentInput}
+                                        disabled={isTrading}
+                                        onChange={event =>
+                                            setCompoundPercentInput(cleanMoneyInput(event.target.value))
+                                        }
+                                    />
+                                </label>
+                            )}
+                        </div>
+                    </details>
 
                     <div className='aviator-divider' />
 
