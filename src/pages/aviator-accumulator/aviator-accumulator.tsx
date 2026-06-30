@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { DBOT_TABS } from '@/constants/bot-contents';
-import { MessageTypes } from '@/external/bot-skeleton';
+import { api_base, MessageTypes } from '@/external/bot-skeleton';
 import { useStore } from '@/hooks/useStore';
 import { buyContractForUi, streamContractUntilSettled } from '@/utils/trade-purchase';
+import { safeSubscribe } from '@/utils/websocket-handler';
 import { Localize } from '@deriv-com/translations';
 import './aviator-accumulator.scss';
 
@@ -17,6 +18,12 @@ type TBreakoutRecord = {
     profit: number;
     stake: number;
     time: number;
+};
+
+type TVolatilitySnapshot = {
+    quote: number;
+    prevQuote: number | null;
+    epoch: number;
 };
 
 const ACCUMULATOR_MARKETS = [
@@ -45,7 +52,7 @@ const DEFAULT_MARTINGALE_TRIGGER = '1.10';
 const DEFAULT_MARTINGALE_FACTOR = '2';
 const DEFAULT_MAX_MARTINGALE_STEPS = '5';
 const DEFAULT_COMPOUND_PERCENT = '10';
-const MAX_HISTORY = 30;
+const MAX_HISTORY = 15;
 const RESULT_PAUSE_MS = 1400;
 
 const cleanMoneyInput = (value: string) => value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
@@ -92,6 +99,10 @@ const AviatorAccumulator = observer(() => {
     const [phase, setPhase] = useState<TPhase>('idle');
     const [liveMultiplier, setLiveMultiplier] = useState(1);
     const [history, setHistory] = useState<TBreakoutRecord[]>([]);
+
+    // ==================== Live "all volatilities" feed (updates even when bot isn't trading) ====================
+    const [volatilityTicks, setVolatilityTicks] = useState<Record<string, TVolatilitySnapshot>>({});
+    const volatilitySubsRef = useRef<Array<{ unsubscribe?: () => void } | null>>([]);
 
     const shouldStopRef = useRef(true);
     const selectedSymbolRef = useRef(selectedSymbol);
@@ -156,6 +167,67 @@ const AviatorAccumulator = observer(() => {
     const currency = client?.currency || 'USD';
     const selectedMarket =
         ACCUMULATOR_MARKETS.find(market => market.symbol === selectedSymbol) ?? ACCUMULATOR_MARKETS[4];
+
+    // ==================== Live "all volatilities" feed ====================
+    // Subscribes to every accumulator-eligible volatility symbol and keeps updating
+    // regardless of whether the bot is actively trading, so the page never goes stale.
+    useEffect(() => {
+        if (!showAviatorAccumulator) return undefined;
+
+        let cancelled = false;
+
+        const subscribeAll = async () => {
+            if (!api_base.api) {
+                if (!cancelled) setTimeout(subscribeAll, 1000);
+                return;
+            }
+
+            ACCUMULATOR_MARKETS.forEach((market, index) => {
+                try {
+                    const observable = (api_base.api as any).subscribe({ ticks: market.symbol });
+                    const subscription = safeSubscribe(observable, (data: any) => {
+                        if (cancelled) return;
+                        if (data?.error) {
+                            // Stream hiccups for the overview panel are non-fatal; ignore unless logging is needed.
+                            return;
+                        }
+                        const quote = Number(data?.tick?.quote);
+                        const epoch = Number(data?.tick?.epoch) || Math.floor(Date.now() / 1000);
+                        if (!Number.isFinite(quote)) return;
+
+                        setVolatilityTicks(prev => {
+                            const previous = prev[market.symbol];
+                            return {
+                                ...prev,
+                                [market.symbol]: {
+                                    quote,
+                                    prevQuote: previous ? previous.quote : null,
+                                    epoch,
+                                },
+                            };
+                        });
+                    });
+                    volatilitySubsRef.current[index] = subscription;
+                } catch {
+                    // Subscription failures for the overview panel are non-fatal.
+                }
+            });
+        };
+
+        void subscribeAll();
+
+        return () => {
+            cancelled = true;
+            volatilitySubsRef.current.forEach(sub => {
+                try {
+                    sub?.unsubscribe?.();
+                } catch {
+                    // Already closed.
+                }
+            });
+            volatilitySubsRef.current = [];
+        };
+    }, [showAviatorAccumulator]);
 
     // ==================== Transactions & Journal ====================
 
@@ -489,10 +561,43 @@ const AviatorAccumulator = observer(() => {
                         )}
                     </div>
 
-                    {/* ==================== Last 30 breakouts ==================== */}
+                    {/* ==================== All volatilities — live ==================== */}
+                    <div className='aviator-volatilities'>
+                        <div className='aviator-volatilities__title'>
+                            <Localize i18n_default_text='All Volatilities — Live' />
+                        </div>
+                        <div className='aviator-volatilities__grid'>
+                            {ACCUMULATOR_MARKETS.map(market => {
+                                const snapshot = volatilityTicks[market.symbol];
+                                const direction =
+                                    snapshot && snapshot.prevQuote != null
+                                        ? snapshot.quote > snapshot.prevQuote
+                                            ? 'up'
+                                            : snapshot.quote < snapshot.prevQuote
+                                              ? 'down'
+                                              : 'flat'
+                                        : 'flat';
+                                return (
+                                    <div
+                                        key={market.symbol}
+                                        className={`aviator-volatility-card ${
+                                            market.symbol === selectedSymbol ? 'aviator-volatility-card--active' : ''
+                                        }`}
+                                    >
+                                        <span className='aviator-volatility-card__label'>{market.label}</span>
+                                        <span className={`aviator-volatility-card__quote aviator-volatility-card__quote--${direction}`}>
+                                            {snapshot ? snapshot.quote.toFixed(4) : '—'}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* ==================== Last 15 breakouts ==================== */}
                     <div className='aviator-history'>
                         <div className='aviator-history__title'>
-                            <Localize i18n_default_text='Last 30 Breakouts' />
+                            <Localize i18n_default_text='Last 15 Breakouts' />
                         </div>
                         <div className='aviator-history__track'>
                             {history.length === 0 && (
