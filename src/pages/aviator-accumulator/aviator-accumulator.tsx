@@ -523,6 +523,16 @@ const AviatorAccumulator = observer(() => {
 
     if (!showAviatorAccumulator) return null;
 
+    const selectedSnapshot = volatilityTicks[selectedSymbol];
+    const selectedDirection =
+        selectedSnapshot && selectedSnapshot.prevQuote != null
+            ? selectedSnapshot.quote > selectedSnapshot.prevQuote
+                ? 'up'
+                : selectedSnapshot.quote < selectedSnapshot.prevQuote
+                  ? 'down'
+                  : 'flat'
+            : 'flat';
+
     return (
         <div className='aviator-page'>
             <div className='aviator-layout'>
@@ -530,6 +540,12 @@ const AviatorAccumulator = observer(() => {
                 <div className='aviator-main'>
                     <div className={`aviator-scene aviator-scene--${phase}`}>
                         <div className='aviator-scene__grid' />
+                        <div className='aviator-scene__live-price'>
+                            <span className='aviator-scene__live-price-label'>{selectedMarket.label}</span>
+                            <span className={`aviator-scene__live-price-quote aviator-scene__live-price-quote--${selectedDirection}`}>
+                                {selectedSnapshot ? selectedSnapshot.quote.toFixed(4) : '—'}
+                            </span>
+                        </div>
                         <div className='aviator-multiplier'>{liveMultiplier.toFixed(2)}x</div>
 
                         <div className='aviator-jet-track'>
@@ -564,39 +580,6 @@ const AviatorAccumulator = observer(() => {
                                 <Localize i18n_default_text='Ready for takeoff' />
                             </div>
                         )}
-                    </div>
-
-                    {/* ==================== All volatilities — live ==================== */}
-                    <div className='aviator-volatilities'>
-                        <div className='aviator-volatilities__title'>
-                            <Localize i18n_default_text='All Volatilities — Live' />
-                        </div>
-                        <div className='aviator-volatilities__grid'>
-                            {ACCUMULATOR_MARKETS.map(market => {
-                                const snapshot = volatilityTicks[market.symbol];
-                                const direction =
-                                    snapshot && snapshot.prevQuote != null
-                                        ? snapshot.quote > snapshot.prevQuote
-                                            ? 'up'
-                                            : snapshot.quote < snapshot.prevQuote
-                                              ? 'down'
-                                              : 'flat'
-                                        : 'flat';
-                                return (
-                                    <div
-                                        key={market.symbol}
-                                        className={`aviator-volatility-card ${
-                                            market.symbol === selectedSymbol ? 'aviator-volatility-card--active' : ''
-                                        }`}
-                                    >
-                                        <span className='aviator-volatility-card__label'>{market.label}</span>
-                                        <span className={`aviator-volatility-card__quote aviator-volatility-card__quote--${direction}`}>
-                                            {snapshot ? snapshot.quote.toFixed(4) : '—'}
-                                        </span>
-                                    </div>
-                                );
-                            })}
-                        </div>
                     </div>
 
                     {/* ==================== Last 15 breakouts ==================== */}
@@ -863,6 +846,39 @@ const AviatorAccumulator = observer(() => {
                     <p className='aviator-tp-sl-hint'>
                         <Localize i18n_default_text='Each round buys an Accumulator with the selected Growth Rate. The contract auto-settles when it knocks out (break) or hits the Take Profit %.' />
                     </p>
+                </div>
+
+                {/* ==================== All volatilities — live (always updating, even when idle) ==================== */}
+                <div className='aviator-volatilities'>
+                    <div className='aviator-volatilities__title'>
+                        <Localize i18n_default_text='All Volatilities — Live' />
+                    </div>
+                    <div className='aviator-volatilities__grid'>
+                        {ACCUMULATOR_MARKETS.map(market => {
+                            const snapshot = volatilityTicks[market.symbol];
+                            const direction =
+                                snapshot && snapshot.prevQuote != null
+                                    ? snapshot.quote > snapshot.prevQuote
+                                        ? 'up'
+                                        : snapshot.quote < snapshot.prevQuote
+                                          ? 'down'
+                                          : 'flat'
+                                    : 'flat';
+                            return (
+                                <div
+                                    key={market.symbol}
+                                    className={`aviator-volatility-card ${
+                                        market.symbol === selectedSymbol ? 'aviator-volatility-card--active' : ''
+                                    }`}
+                                >
+                                    <span className='aviator-volatility-card__label'>{market.label}</span>
+                                    <span className={`aviator-volatility-card__quote aviator-volatility-card__quote--${direction}`}>
+                                        {snapshot ? snapshot.quote.toFixed(4) : '—'}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             </div>
         </div>
