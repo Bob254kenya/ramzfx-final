@@ -8,6 +8,7 @@ export const getActiveTabUrl = () => {
         'manual_trading',
         'scanner',
         'analysistool',
+        'speed_bot',
     ] as const;
     const getTabName = (index: number) => TAB_NAMES[index];
     const current_tab_name = getTabName(Number(current_tab_number));
