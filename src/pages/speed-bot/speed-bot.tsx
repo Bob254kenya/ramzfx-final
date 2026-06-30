@@ -85,6 +85,9 @@ const SpeedBot = observer(() => {
     const [useMartingale, setUseMartingale] = useState(false);
     const [martingaleMultiplierInput, setMartingaleMultiplierInput] = useState(DEFAULT_MARTINGALE_MULTIPLIER);
     const [recoveryMode, setRecoveryMode] = useState(false);
+    const [recoveryMarket, setRecoveryMarket] = useState(DEFAULT_SYMBOL);
+    const [recoveryTradeType, setRecoveryTradeType] = useState<TTradeType>('Over');
+    const [recoveryBarrierInput, setRecoveryBarrierInput] = useState('5');
     const [autoAnalyze, setAutoAnalyze] = useState(false);
     const [takeProfitInput, setTakeProfitInput] = useState(DEFAULT_TAKE_PROFIT);
     const [stopLossInput, setStopLossInput] = useState(DEFAULT_STOP_LOSS);
@@ -106,6 +109,9 @@ const SpeedBot = observer(() => {
     const useMartingaleRef = useRef(useMartingale);
     const martingaleMultiplierRef = useRef(1.15);
     const recoveryModeRef = useRef(recoveryMode);
+    const recoveryMarketRef = useRef(recoveryMarket);
+    const recoveryTradeTypeRef = useRef<TTradeType>(recoveryTradeType);
+    const recoveryBarrierRef = useRef(recoveryBarrierInput);
     const selectedSymbolRef = useRef(selectedSymbol);
     const autoAnalyzeRef = useRef(autoAnalyze);
     const takeProfitRef = useRef(parseFloat(DEFAULT_TAKE_PROFIT));
@@ -135,6 +141,15 @@ const SpeedBot = observer(() => {
     useEffect(() => {
         recoveryModeRef.current = recoveryMode;
     }, [recoveryMode]);
+    useEffect(() => {
+        recoveryMarketRef.current = recoveryMarket;
+    }, [recoveryMarket]);
+    useEffect(() => {
+        recoveryTradeTypeRef.current = recoveryTradeType;
+    }, [recoveryTradeType]);
+    useEffect(() => {
+        recoveryBarrierRef.current = recoveryBarrierInput;
+    }, [recoveryBarrierInput]);
     useEffect(() => {
         selectedSymbolRef.current = selectedSymbol;
     }, [selectedSymbol]);
@@ -335,7 +350,7 @@ const SpeedBot = observer(() => {
     // ==================== Trading ====================
 
     const buildTradeParameters = useCallback(
-        (type: TTradeType, stake: number, durationTicks: number, barrier: string) => {
+        (type: TTradeType, stake: number, durationTicks: number, barrier: string, symbol?: string) => {
             const parameters: Record<string, any> = {
                 amount: stake,
                 basis: 'stake',
@@ -343,7 +358,7 @@ const SpeedBot = observer(() => {
                 currency,
                 duration: durationTicks,
                 duration_unit: 't',
-                symbol: selectedSymbolRef.current,
+                symbol: symbol ?? selectedSymbolRef.current,
             };
             if (BARRIER_CONTRACT_TYPES.includes(type)) {
                 parameters.barrier = barrier;
@@ -354,13 +369,13 @@ const SpeedBot = observer(() => {
     );
 
     const runSingleTrade = useCallback(
-        async (type: TTradeType, stake: number, durationTicks: number, barrier: string): Promise<number> => {
-            const symbol = selectedSymbolRef.current;
+        async (type: TTradeType, stake: number, durationTicks: number, barrier: string, symbol?: string): Promise<number> => {
+            const activeSymbol = symbol ?? selectedSymbolRef.current;
             const contractTypeCode = CONTRACT_TYPE_CODE[type];
             const tradeStartTime = Math.floor(Date.now() / 1000);
 
             const buy = await buyContractForUi({
-                parameters: buildTradeParameters(type, stake, durationTicks, barrier),
+                parameters: buildTradeParameters(type, stake, durationTicks, barrier, activeSymbol),
                 price: stake,
                 source: 'Speed Bot',
             });
@@ -370,16 +385,19 @@ const SpeedBot = observer(() => {
                 contract_id: buy.contract_id,
                 transaction_ids: { buy: buy.transaction_id },
                 date_start: tradeStartTime,
-                display_name: symbol,
-                underlying_symbol: symbol,
-                shortcode: `SPEEDBOT_${contractTypeCode}_${symbol}`,
+                display_name: activeSymbol,
+                underlying_symbol: activeSymbol,
+                shortcode: `SPEEDBOT_${contractTypeCode}_${activeSymbol}`,
                 contract_type: contractTypeCode,
                 currency,
             };
 
             // Show the open transaction immediately in the Transactions table.
             pushContract(fallback);
-            logJournal(`🛒 Speed Bot bought ${type} on ${symbol} — stake ${stake.toFixed(2)} ${currency}`, MessageTypes.SUCCESS);
+            logJournal(
+                `🛒 Speed Bot bought ${type} on ${activeSymbol} — stake ${stake.toFixed(2)} ${currency}`,
+                MessageTypes.SUCCESS
+            );
 
             const settled = await streamContractUntilSettled({
                 contractId: buy.contract_id,
@@ -393,8 +411,8 @@ const SpeedBot = observer(() => {
 
             logJournal(
                 won
-                    ? `✅ Speed Bot won ${profit.toFixed(2)} ${currency} (${type} on ${symbol})`
-                    : `❌ Speed Bot lost ${Math.abs(profit).toFixed(2)} ${currency} (${type} on ${symbol})`,
+                    ? `✅ Speed Bot won ${profit.toFixed(2)} ${currency} (${type} on ${activeSymbol})`
+                    : `❌ Speed Bot lost ${Math.abs(profit).toFixed(2)} ${currency} (${type} on ${activeSymbol})`,
                 won ? MessageTypes.SUCCESS : MessageTypes.ERROR
             );
 
@@ -449,18 +467,31 @@ const SpeedBot = observer(() => {
         let currentType: TTradeType = autoAnalyzeRef.current ? analyzeAndPickTradeType() : tradeTypeRef.current;
 
         while (!shouldStopRef.current) {
+            const inRecovery = recoveryModeRef.current && isRecoveringRef.current;
+
             // When auto-analysis is enabled, re-evaluate the last-tick analysis
             // before every trade so direction always follows the latest data.
-            if (autoAnalyzeRef.current) {
+            // Skipped while recovering — the recovery market/trade-type takes over.
+            if (autoAnalyzeRef.current && !inRecovery) {
                 currentType = analyzeAndPickTradeType();
             }
 
+            // Recovery Mode: once a loss puts us in recovery, switch to the dedicated
+            // recovery market and trade type until a win clears the cycle.
+            const activeSymbol = inRecovery ? recoveryMarketRef.current : selectedSymbolRef.current;
+            const activeType: TTradeType = inRecovery ? recoveryTradeTypeRef.current : currentType;
+            const activeBarrier = inRecovery ? recoveryBarrierRef.current : barrierRef.current;
+
             setIsTradeInFlight(true);
             const tradeStake = currentStakeRef.current;
-            setStatusMessage(`Trading ${currentType} with ${tradeStake.toFixed(2)} ${currency}...`);
+            setStatusMessage(
+                inRecovery
+                    ? `🔁 Recovery: Trading ${activeType} on ${activeSymbol} with ${tradeStake.toFixed(2)} ${currency}...`
+                    : `Trading ${activeType} with ${tradeStake.toFixed(2)} ${currency}...`
+            );
 
             try {
-                const profit = await runSingleTrade(currentType, tradeStake, durationTicks, barrierRef.current);
+                const profit = await runSingleTrade(activeType, tradeStake, durationTicks, activeBarrier, activeSymbol);
                 if (shouldStopRef.current) break;
 
                 const won = profit > 0;
@@ -471,6 +502,12 @@ const SpeedBot = observer(() => {
                     setStatusMessage(`✅ Won ${profit.toFixed(2)} ${currency}`);
                     consecutiveLossesRef.current = 0;
                     currentStakeRef.current = baseStakeRef.current;
+                    if (inRecovery) {
+                        logJournal(
+                            `✅ Recovery cleared — switching back to ${selectedSymbolRef.current}`,
+                            MessageTypes.SUCCESS
+                        );
+                    }
                     isRecoveringRef.current = false;
                 } else {
                     setStatusMessage(`❌ Lost ${Math.abs(profit).toFixed(2)} ${currency}`);
@@ -485,6 +522,12 @@ const SpeedBot = observer(() => {
                     // Recovery Mode: keep escalating the stake to recover losses, independent of
                     // the Martingale toggle, until a winning trade resets the cycle.
                     if (recoveryModeRef.current) {
+                        if (!isRecoveringRef.current) {
+                            logJournal(
+                                `🔁 Recovery Mode triggered — switching to ${recoveryTradeTypeRef.current} on ${recoveryMarketRef.current}`,
+                                MessageTypes.NOTIFY
+                            );
+                        }
                         isRecoveringRef.current = true;
                         if (!useMartingaleRef.current) {
                             currentStakeRef.current =
@@ -493,7 +536,9 @@ const SpeedBot = observer(() => {
                     }
 
                     // Alternating only makes sense for the Even/Odd pair; other contract types keep their selection.
+                    // Skipped while recovering — the primary direction resumes once recovery clears.
                     if (
+                        !inRecovery &&
                         !autoAnalyzeRef.current &&
                         alternateOnLossRef.current &&
                         (currentType === 'Even' || currentType === 'Odd')
@@ -503,8 +548,9 @@ const SpeedBot = observer(() => {
                 }
 
                 // Alternate Even/Odd on every trade regardless of outcome (manual mode only;
-                // auto-analysis picks its own direction every iteration).
+                // auto-analysis picks its own direction every iteration). Skipped while recovering.
                 if (
+                    !inRecovery &&
                     !autoAnalyzeRef.current &&
                     alternateEvenOddRef.current &&
                     (currentType === 'Even' || currentType === 'Odd')
@@ -512,7 +558,7 @@ const SpeedBot = observer(() => {
                     currentType = currentType === 'Even' ? 'Odd' : 'Even';
                 }
 
-                setTradeType(currentType);
+                if (!inRecovery) setTradeType(currentType);
 
                 // Stop Loss / Take Profit: end the session once either threshold is reached.
                 const takeProfit = takeProfitRef.current;
@@ -969,6 +1015,77 @@ const SpeedBot = observer(() => {
                         <span className='speed-bot-switch__knob' />
                     </span>
                 </label>
+
+                {recoveryMode && (
+                    <div className='speed-bot-recovery'>
+                        <p className='speed-bot-hint'>
+                            <Localize i18n_default_text='After a loss, the bot switches to this market and trade type — with the escalated stake — until a win clears the recovery cycle.' />
+                        </p>
+
+                        <label className='speed-bot-field'>
+                            <span>
+                                <Localize i18n_default_text='Recovery Market' />
+                            </span>
+                            <select
+                                className='speed-bot-select'
+                                value={recoveryMarket}
+                                disabled={isTrading}
+                                onChange={event => setRecoveryMarket(event.target.value)}
+                            >
+                                {SUPPORTED_VOLATILITY_MARKETS.map(market => (
+                                    <option key={market.symbol} value={market.symbol}>
+                                        {market.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+
+                        <label className='speed-bot-field'>
+                            <span>
+                                <Localize i18n_default_text='Recovery Trade Type' />
+                            </span>
+                            <select
+                                className='speed-bot-select'
+                                value={recoveryTradeType}
+                                disabled={isTrading}
+                                onChange={event => setRecoveryTradeType(event.target.value as TTradeType)}
+                            >
+                                <optgroup label='Even / Odd'>
+                                    <option value='Even'>Even</option>
+                                    <option value='Odd'>Odd</option>
+                                </optgroup>
+                                <optgroup label='Over / Under'>
+                                    <option value='Over'>Over</option>
+                                    <option value='Under'>Under</option>
+                                </optgroup>
+                                <optgroup label='Matches / Differs'>
+                                    <option value='Matches'>Matches</option>
+                                    <option value='Differs'>Differs</option>
+                                </optgroup>
+                                <optgroup label='Rise / Fall'>
+                                    <option value='Rise'>Rise</option>
+                                    <option value='Fall'>Fall</option>
+                                </optgroup>
+                            </select>
+                        </label>
+
+                        {BARRIER_CONTRACT_TYPES.includes(recoveryTradeType) && (
+                            <label className='speed-bot-field'>
+                                <span>
+                                    <Localize i18n_default_text='Recovery Barrier Digit (0-9)' />
+                                </span>
+                                <input
+                                    inputMode='numeric'
+                                    value={recoveryBarrierInput}
+                                    disabled={isTrading}
+                                    onChange={event =>
+                                        setRecoveryBarrierInput(cleanIntegerInput(event.target.value).slice(0, 1))
+                                    }
+                                />
+                            </label>
+                        )}
+                    </div>
+                )}
 
                 <div className='speed-bot-divider' />
 
