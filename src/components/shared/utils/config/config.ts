@@ -29,6 +29,7 @@ type DomainFeatureFlags = {
     autoTrades: boolean;
     manualTrading: boolean;
     scanner: boolean;
+    speedBot: boolean;
     chart: boolean;
 };
 
@@ -101,6 +102,7 @@ const DEFAULT_DOMAIN_FEATURES: DomainFeatureFlags = {
     autoTrades: true,
     manualTrading: true,
     scanner: true,
+    speedBot: true,
     chart: true,
 };
 
