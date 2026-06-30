@@ -196,11 +196,19 @@ $at-text-faint: #2c4060;
     }
 
     &--m1::before {
-        background: linear-gradient(90deg, $at-navy, $at-navy-bright, $at-navy);
+        background: linear-gradient(90deg, #1e5aa8, #2e7fd8, #1e5aa8);
     }
 
     &--m2::before {
         background: linear-gradient(90deg, $at-amber, #f0a030, $at-amber);
+    }
+
+    &--top-row::before {
+        background: linear-gradient(90deg, #4a6a90, $at-navy-bright, #4a6a90);
+    }
+
+    &--full {
+        width: 100%;
     }
 
     &__title {
@@ -219,28 +227,77 @@ $at-text-faint: #2c4060;
             height: 1px;
             background: $at-border;
         }
+
+        &--small {
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+
+            &::after {
+                display: none;
+            }
+        }
     }
 }
 
-// ── Mode Selector ──────────────────────────────────────────────────────────
+// ── Top Row (Trading Mode + Risk) ──────────────────────────────────────────
+
+.auto-trades-top-row {
+    display: flex;
+    gap: 2rem;
+    align-items: flex-start;
+
+    @media (max-width: 768px) {
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    &__section {
+        flex: 1;
+
+        &--mode {
+            flex: 0.8;
+            min-width: 200px;
+        }
+
+        &--risk {
+            flex: 2;
+            min-width: 0;
+        }
+    }
+}
 
 .auto-trades-mode-selector {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
+    &--horizontal {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
 }
 
 .auto-trades-mode-btn {
     all: unset;
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 1rem 1.2rem;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
     background: $at-bg-deep;
     border: 1px solid $at-border;
-    border-radius: 0.8rem;
+    border-radius: 0.6rem;
     cursor: pointer;
     transition: all 0.2s;
+
+    &--compact {
+        padding: 0.4rem 0.8rem;
+        font-size: 1.1rem;
+
+        .auto-trades-mode-btn__icon {
+            font-size: 1.2rem;
+        }
+        .auto-trades-mode-btn__label {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+    }
 
     &:hover:not(&--disabled) {
         border-color: $at-border-glow;
@@ -268,19 +325,105 @@ $at-text-faint: #2c4060;
         font-weight: 700;
         color: $at-text;
     }
-
-    &__desc {
-        font-size: 1.1rem;
-        color: $at-text-muted;
-        margin-left: auto;
-    }
 }
 
 .auto-trades-mode-hint {
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     color: $at-text-muted;
-    margin-top: 0.8rem;
+    margin-top: 0.3rem;
+}
+
+.auto-trades-recovery-status {
+    background: #f44336;
+    color: #fff;
+    padding: 0.3rem 0.8rem;
+    border-radius: 0.4rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-top: 0.5rem;
     text-align: center;
+}
+
+// ── Risk Row ────────────────────────────────────────────────────────────────
+
+.auto-trades-risk-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 0.6rem;
+    margin-bottom: 0.6rem;
+
+    @media (max-width: 768px) {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+.auto-trades-risk-field {
+    label {
+        display: block;
+        font-size: 1rem;
+        font-weight: 600;
+        color: $at-text-dim;
+        margin-bottom: 0.2rem;
+    }
+
+    input {
+        width: 100%;
+        padding: 0.4rem 0.6rem;
+        border: 1px solid $at-border;
+        border-radius: 0.4rem;
+        background: $at-bg-deep;
+        color: $at-text;
+        font-size: 1.2rem;
+        font-weight: 600;
+
+        &:focus {
+            outline: none;
+            border-color: $at-crimson;
+            box-shadow: 0 0 0 2px $at-crimson-glow;
+        }
+
+        &:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+    }
+
+    &__input--small {
+        width: 6rem;
+        margin-left: 0.5rem;
+    }
+}
+
+.auto-trades-risk-martingale {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+
+    select {
+        padding: 0.3rem 1.8rem 0.3rem 0.8rem;
+        border: 1px solid $at-border;
+        border-radius: 0.4rem;
+        background: $at-bg-deep;
+        color: $at-text;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='%234a6a90' d='M0 0l4 5 4-5z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.5rem center;
+
+        &:focus {
+            outline: none;
+            border-color: $at-crimson;
+        }
+
+        &:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+    }
 }
 
 // ── Toggle Switch ──────────────────────────────────────────────────────────
@@ -341,21 +484,25 @@ $at-text-faint: #2c4060;
         grid-template-columns: minmax(12rem, 0.9fr) minmax(20rem, 1.4fr) minmax(10rem, 0.75fr);
         gap: 1.2rem;
         align-items: flex-end;
+
+        @media (max-width: 768px) {
+            grid-template-columns: 1fr 1fr;
+        }
     }
 
     &__field {
         label {
             display: block;
-            font-size: 1.3rem;
+            font-size: 1.1rem;
             font-weight: 600;
             color: $at-text-dim;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.4rem;
             letter-spacing: 0.01em;
         }
 
         input,
         select {
-            font-size: 1.4rem !important;
+            font-size: 1.2rem !important;
         }
     }
 
@@ -409,22 +556,22 @@ $at-text-faint: #2c4060;
     }
 
     &__streak-value {
-        font-size: 2.2rem;
+        font-size: 2rem;
         font-weight: 900;
         color: $at-crimson;
-        min-width: 3.2rem;
+        min-width: 2.8rem;
         text-align: center;
         font-variant-numeric: tabular-nums;
     }
 
     &__select {
         width: 100%;
-        padding: 0.9rem 1.2rem;
+        padding: 0.6rem 1rem;
         border: 1px solid $at-border;
         border-radius: 0.6rem;
         background: $at-bg-deep;
         color: $at-text;
-        font-size: 1.4rem;
+        font-size: 1.2rem;
         font-weight: 600;
         cursor: pointer;
         appearance: none;
@@ -451,13 +598,13 @@ $at-text-faint: #2c4060;
         }
 
         &--compact {
-            padding: 0.6rem 2rem 0.6rem 0.8rem;
-            font-size: 1.3rem;
-            border-radius: 0.5rem;
+            padding: 0.4rem 1.8rem 0.4rem 0.6rem;
+            font-size: 1.1rem;
+            border-radius: 0.4rem;
             min-width: 0;
             width: 100%;
             background-position: right 0.5rem center;
-            padding-right: 2rem;
+            padding-right: 1.8rem;
         }
     }
 
@@ -467,10 +614,10 @@ $at-text-faint: #2c4060;
     }
 
     &__prediction-label {
-        font-size: 1.3rem;
+        font-size: 1.1rem;
         font-weight: 700;
         color: $at-text-dim;
-        margin-bottom: 0.6rem;
+        margin-bottom: 0.4rem;
         display: flex;
         align-items: center;
         gap: 0.5rem;
@@ -478,7 +625,7 @@ $at-text-faint: #2c4060;
     }
 
     &__prediction-hint {
-        font-size: 1.1rem;
+        font-size: 0.9rem;
         font-weight: 500;
         color: $at-text-muted;
         letter-spacing: 0.01em;
@@ -487,11 +634,11 @@ $at-text-faint: #2c4060;
     &__prediction-controls {
         display: flex;
         align-items: center;
-        gap: 0.8rem;
+        gap: 0.6rem;
         background: $at-bg-deep;
         border: 1px solid $at-border;
-        border-radius: 0.8rem;
-        padding: 0.6rem 1rem;
+        border-radius: 0.6rem;
+        padding: 0.4rem 0.8rem;
         width: 100%;
         min-width: 0;
     }
@@ -499,7 +646,7 @@ $at-text-faint: #2c4060;
     &__prediction-item {
         display: flex;
         align-items: center;
-        gap: 0.6rem;
+        gap: 0.4rem;
         flex: 1;
         min-width: 0;
     }
@@ -508,10 +655,10 @@ $at-text-faint: #2c4060;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 2.2rem;
-        height: 2.2rem;
+        width: 1.8rem;
+        height: 1.8rem;
         border-radius: 50%;
-        font-size: 1rem;
+        font-size: 0.8rem;
         font-weight: 800;
         flex-shrink: 0;
 
@@ -529,10 +676,21 @@ $at-text-faint: #2c4060;
     }
 
     &__prediction-divider {
-        font-size: 1.3rem;
+        font-size: 1rem;
         color: $at-border-glow;
         font-weight: 500;
         padding: 0 0.2rem;
+    }
+
+    &__martingale-active {
+        background: rgba(255, 204, 0, 0.1);
+        border: 1px solid rgba(255, 204, 0, 0.2);
+        padding: 0.3rem 0.8rem;
+        border-radius: 0.4rem;
+        margin-top: 0.5rem;
+        color: #ffcc00;
+        font-size: 0.9rem;
+        font-weight: 600;
     }
 }
 
@@ -683,10 +841,10 @@ $at-text-faint: #2c4060;
     display: flex;
     align-items: center;
     gap: 0.8rem;
-    padding: 1.2rem 1.4rem;
+    padding: 0.8rem 1.2rem;
     background: $at-bg-deep;
     border: 1px solid $at-border;
-    border-radius: 0.8rem;
+    border-radius: 0.6rem;
     cursor: pointer;
     transition: all 0.2s;
     text-align: left;
@@ -708,11 +866,11 @@ $at-text-faint: #2c4060;
     }
 
     &__badge {
-        padding: 0.3rem 0.8rem;
+        padding: 0.2rem 0.6rem;
         background: $at-bg-card-2;
         border: 1px solid $at-border;
         border-radius: 1.5rem;
-        font-size: 1rem;
+        font-size: 0.9rem;
         font-weight: 700;
         color: $at-text-dim;
         white-space: nowrap;
@@ -726,14 +884,14 @@ $at-text-faint: #2c4060;
 
     &__label {
         flex: 1;
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         font-weight: 700;
         color: $at-text;
     }
 
     &__switch {
-        width: 2.6rem;
-        height: 1.3rem;
+        width: 2.4rem;
+        height: 1.2rem;
         background: $at-border;
         border-radius: 1.2rem;
         display: flex;
@@ -743,8 +901,8 @@ $at-text-faint: #2c4060;
         transition: all 0.2s;
 
         .auto-trades-inverse__toggle-knob {
-            width: 1rem;
-            height: 1rem;
+            width: 0.9rem;
+            height: 0.9rem;
             border-radius: 50%;
             background: $at-text-muted;
             transition: all 0.2s;
@@ -770,18 +928,18 @@ $at-text-faint: #2c4060;
     gap: 0.4rem;
 
     label {
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         font-weight: 600;
         color: $at-text-muted;
     }
 
     &__select {
-        padding: 0.8rem 1.2rem;
+        padding: 0.6rem 1rem;
         border-radius: 0.6rem;
         border: 1px solid $at-border;
         background: $at-bg-deep;
         color: $at-text;
-        font-size: 1.3rem;
+        font-size: 1.2rem;
         font-weight: 600;
         cursor: pointer;
         transition: all 0.2s;
@@ -804,20 +962,20 @@ $at-text-faint: #2c4060;
 .auto-trades-martingale-selector {
     label {
         display: block;
-        font-size: 1.3rem;
+        font-size: 1.1rem;
         font-weight: 600;
         color: $at-text-dim;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.3rem;
     }
 
     &__select {
         width: 100%;
-        padding: 0.9rem 2.8rem 0.9rem 1.2rem;
+        padding: 0.6rem 2.8rem 0.6rem 1rem;
         border: 1px solid $at-border;
         border-radius: 0.6rem;
         background: $at-bg-deep;
         color: $at-text;
-        font-size: 1.4rem;
+        font-size: 1.2rem;
         font-weight: 600;
         cursor: pointer;
         appearance: none;
@@ -830,15 +988,23 @@ $at-text-faint: #2c4060;
             border-color: $at-crimson;
             box-shadow: 0 0 0 2px $at-crimson-glow;
         }
+
+        &--small {
+            width: auto;
+            min-width: 140px;
+            padding: 0.3rem 2rem 0.3rem 0.6rem;
+            font-size: 0.9rem;
+            background-position: right 0.5rem center;
+        }
     }
 }
 
 // ── Hint text ────────────────────────────────────────────────────────────────
 
 .auto-trades-inverse__hint {
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     color: $at-text-muted;
-    margin-top: 0.5rem;
+    margin-top: 0.4rem;
     line-height: 1.4;
 }
 
@@ -857,7 +1023,7 @@ $at-text-faint: #2c4060;
     }
 
     &__selected-count {
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         font-weight: 600;
         color: $at-text-muted;
         background: $at-bg-card-2;
@@ -867,7 +1033,7 @@ $at-text-faint: #2c4060;
     }
 
     &__live-badge {
-        font-size: 1.1rem;
+        font-size: 1rem;
         font-weight: 700;
         color: $at-win;
         background: $at-win-glow;
@@ -878,7 +1044,7 @@ $at-text-faint: #2c4060;
     }
 
     &__mode-badge {
-        font-size: 1.1rem;
+        font-size: 1rem;
         font-weight: 700;
         background: $at-crimson-faint;
         border: 1px solid rgba(196, 32, 56, 0.2);
@@ -887,19 +1053,39 @@ $at-text-faint: #2c4060;
         color: $at-crimson-light;
     }
 
+    &__martingale-badge {
+        font-size: 1rem;
+        font-weight: 700;
+        background: rgba(255, 204, 0, 0.1);
+        border: 1px solid rgba(255, 204, 0, 0.2);
+        padding: 0.2rem 0.8rem;
+        border-radius: 2rem;
+        color: #ffcc00;
+    }
+
+    &__recovery-badge {
+        font-size: 1rem;
+        font-weight: 700;
+        background: #f44336;
+        padding: 0.2rem 0.8rem;
+        border-radius: 2rem;
+        color: #fff;
+        animation: at-pulse 1s infinite;
+    }
+
     &__actions {
         display: flex;
         gap: 0.6rem;
         margin: -0.4rem 0 1.2rem;
 
         button {
-            min-height: 3.6rem;
-            padding: 0 1.2rem;
+            min-height: 3rem;
+            padding: 0 1rem;
             border: 1px solid $at-border;
             border-radius: 0.6rem;
             background: $at-bg-card;
             color: $at-text-dim;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             font-weight: 700;
             cursor: pointer;
             transition: all 0.15s;
@@ -921,6 +1107,10 @@ $at-text-faint: #2c4060;
         @include mobile-or-tablet-screen {
             grid-template-columns: 1fr;
         }
+
+        &--available {
+            grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+        }
     }
 
     &__available {
@@ -930,14 +1120,14 @@ $at-text-faint: #2c4060;
     }
 
     &__subtitle {
-        font-size: 1.5rem;
+        font-size: 1.4rem;
         font-weight: 700;
         color: $at-text;
         margin: 0 0 0.4rem;
     }
 
     &__help {
-        font-size: 1.3rem;
+        font-size: 1.2rem;
         color: $at-text-muted;
         margin: 0 0 1rem;
     }
@@ -949,7 +1139,7 @@ $at-text-faint: #2c4060;
     background: $at-bg-card;
     border: 1px solid $at-border;
     border-radius: 1.2rem;
-    padding: 1.5rem 1.6rem;
+    padding: 1.2rem 1.4rem;
     transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
     position: relative;
     overflow: hidden;
@@ -979,6 +1169,12 @@ $at-text-faint: #2c4060;
         box-shadow: 0 0 0 1px rgba(255, 107, 53, 0.15);
     }
 
+    &--blocked {
+        border-color: #f44336;
+        background: rgba(244, 67, 54, 0.08);
+        opacity: 0.7;
+    }
+
     &--win {
         border-color: rgba(0, 204, 122, 0.2);
     }
@@ -987,51 +1183,66 @@ $at-text-faint: #2c4060;
         border-color: rgba(196, 32, 56, 0.25);
     }
 
+    &__loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(8, 14, 29, 0.85);
+        gap: 0.8rem;
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: $at-text-dim;
+        border-radius: 1.2rem;
+        z-index: 2;
+    }
+
     &__top {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        margin-bottom: 1rem;
+        margin-bottom: 0.8rem;
         gap: 0.8rem;
     }
 
     &__name {
-        font-size: 1.5rem;
+        font-size: 1.4rem;
         font-weight: 700;
         color: $at-text;
         margin: 0 0 0.2rem;
     }
 
     &__symbol {
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         color: $at-text-muted;
         margin: 0;
     }
 
     &__mode-label {
-        font-size: 1.1rem;
+        font-size: 1rem;
         color: $at-text-dim;
         margin: 0.2rem 0 0;
         font-weight: 500;
     }
 
     &__quote {
-        font-size: 1.8rem;
+        font-size: 1.6rem;
         font-weight: 700;
         font-variant-numeric: tabular-nums;
         color: $at-text;
-        margin-bottom: 0.8rem;
+        margin-bottom: 0.6rem;
     }
 
     &__badge {
-        padding: 0.3rem 0.8rem;
+        padding: 0.2rem 0.6rem;
         border-radius: 2rem;
-        font-size: 1.2rem;
+        font-size: 0.9rem;
         font-weight: 700;
         background: $at-bg-card-2;
         color: $at-text-muted;
         border: 1px solid $at-border;
-        min-width: 4.5rem;
+        min-width: 4rem;
         text-align: center;
 
         &--ready {
@@ -1057,19 +1268,64 @@ $at-text-faint: #2c4060;
             color: #ff6b35;
             border-color: rgba(255, 107, 53, 0.25);
         }
+
+        &--blocked {
+            background: rgba(244, 67, 54, 0.15);
+            color: #f44336;
+            border-color: rgba(244, 67, 54, 0.25);
+        }
+    }
+
+    &__blocked-status {
+        background: rgba(244, 67, 54, 0.15);
+        border-left: 3px solid #f44336;
+        padding: 0.4rem 0.6rem;
+        margin: 0.4rem 0 0.6rem;
+        border-radius: 0.4rem;
+        font-size: 0.9rem;
+        color: #f44336;
+        font-weight: 600;
+
+        small {
+            font-weight: 400;
+            color: $at-text-muted;
+        }
+    }
+
+    &__recovery-status {
+        background: rgba(76, 175, 80, 0.1);
+        border-left: 3px solid #4caf50;
+        padding: 0.4rem 0.6rem;
+        margin: 0.4rem 0 0.6rem;
+        border-radius: 0.4rem;
+        font-size: 0.9rem;
+        color: #4caf50;
+        font-weight: 600;
+
+        small {
+            font-weight: 400;
+            color: $at-text-muted;
+        }
+    }
+
+    &__controls {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-shrink: 0;
     }
 
     &__dots {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        margin-bottom: 0.9rem;
+        gap: 0.4rem;
+        margin-bottom: 0.6rem;
         flex-wrap: wrap;
     }
 
     &__dot {
-        width: 1.2rem;
-        height: 1.2rem;
+        width: 1rem;
+        height: 1rem;
         border-radius: 50%;
         background: $at-border-subtle;
         transition: background 0.2s;
@@ -1093,10 +1349,15 @@ $at-text-faint: #2c4060;
             background: #ff6b35;
             box-shadow: 0 0 4px rgba(255, 107, 53, 0.3);
         }
+
+        &--blocked {
+            background: #f44336;
+            box-shadow: 0 0 4px rgba(244, 67, 54, 0.3);
+        }
     }
 
     &__dots-label {
-        font-size: 1.1rem;
+        font-size: 1rem;
         font-weight: 600;
         color: $at-text-muted;
         margin-left: 0.3rem;
@@ -1104,19 +1365,19 @@ $at-text-faint: #2c4060;
 
     &__digits {
         display: flex;
-        gap: 0.5rem;
+        gap: 0.4rem;
         flex-wrap: wrap;
-        margin-bottom: 0.8rem;
+        margin-bottom: 0.6rem;
     }
 
     &__digit {
-        width: 2.4rem;
-        height: 2.4rem;
+        width: 2rem;
+        height: 2rem;
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: 0.5rem;
-        font-size: 1.2rem;
+        border-radius: 0.4rem;
+        font-size: 1rem;
         font-weight: 700;
 
         &--low {
@@ -1131,11 +1392,11 @@ $at-text-faint: #2c4060;
     }
 
     &__candle {
-        font-size: 1.2rem;
+        font-size: 1rem;
         font-weight: 600;
-        padding: 0.3rem 0.6rem;
+        padding: 0.2rem 0.6rem;
         border-radius: 0.4rem;
-        margin-bottom: 0.8rem;
+        margin-bottom: 0.6rem;
 
         &--bullish {
             color: $at-win;
@@ -1153,15 +1414,33 @@ $at-text-faint: #2c4060;
         }
     }
 
+    &__percentages {
+        font-size: 0.9rem;
+        color: $at-text-dim;
+        margin-bottom: 0.6rem;
+
+        .auto-trades-market__percentage-row {
+            display: flex;
+            gap: 0.8rem;
+            flex-wrap: wrap;
+        }
+
+        .auto-trades-market__confidence {
+            font-size: 0.8rem;
+            color: $at-text-muted;
+            margin-top: 0.2rem;
+        }
+    }
+
     &__footer {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        font-size: 1.2rem;
+        font-size: 1rem;
         font-weight: 600;
         color: $at-text-muted;
         border-top: 1px solid $at-border-subtle;
-        padding-top: 0.8rem;
+        padding-top: 0.6rem;
         margin-top: 0.4rem;
     }
 
@@ -1175,33 +1454,17 @@ $at-text-faint: #2c4060;
         font-weight: 700;
     }
 
-    &__recovery-status {
-        background: rgba(255, 107, 53, 0.1);
-        border-left: 3px solid #ff6b35;
-        padding: 0.6rem 0.8rem;
-        margin: 0.4rem 0 0.8rem;
-        border-radius: 0.4rem;
-        font-size: 1.1rem;
-        color: #ff6b35;
-        font-weight: 600;
-
-        small {
-            font-weight: 400;
-            color: $at-text-dim;
-        }
-    }
-
     &__btn {
         all: unset;
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 2.4rem;
-        height: 2.4rem;
+        width: 2rem;
+        height: 2rem;
         border-radius: 50%;
         cursor: pointer;
         transition: all 0.2s;
-        font-size: 1.4rem;
+        font-size: 1.2rem;
         font-weight: 700;
 
         &--remove {
@@ -1224,12 +1487,12 @@ $at-text-faint: #2c4060;
     background: $at-bg-card;
     border: 1.5px dashed $at-border;
     border-radius: 1.2rem;
-    padding: 1.5rem 1.6rem;
+    padding: 1.2rem 1.4rem;
     cursor: pointer;
     transition: all 0.2s;
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.8rem;
     min-height: 100%;
 
     &:hover {
@@ -1241,26 +1504,26 @@ $at-text-faint: #2c4060;
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 3rem;
-        height: 3rem;
+        width: 2.6rem;
+        height: 2.6rem;
         border-radius: 50%;
         background: $at-crimson-faint;
         color: $at-crimson;
         border: 1px solid rgba(196, 32, 56, 0.25);
-        font-size: 1.8rem;
+        font-size: 1.6rem;
         font-weight: 700;
         flex-shrink: 0;
     }
 
     &__name {
-        font-size: 1.5rem;
+        font-size: 1.3rem;
         font-weight: 700;
         color: $at-text;
         margin: 0 0 0.2rem;
     }
 
     &__symbol {
-        font-size: 1.2rem;
+        font-size: 1rem;
         color: $at-text-muted;
         margin: 0;
     }
@@ -1273,7 +1536,7 @@ $at-text-faint: #2c4060;
     border: 1px dashed $at-border;
     border-radius: 0.8rem;
     padding: 1.6rem 1.8rem;
-    font-size: 1.4rem;
+    font-size: 1.3rem;
     color: $at-text-muted;
     text-align: center;
     line-height: 1.6;
@@ -1783,9 +2046,18 @@ $at-text-faint: #2c4060;
 
     .auto-trades-config {
         &__trade-row {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: 1fr 1fr;
             gap: 0.8rem;
         }
+    }
+
+    .auto-trades-top-row {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .auto-trades-risk-row {
+        grid-template-columns: 1fr 1fr;
     }
 
     .auto-trades-controls {
@@ -1818,7 +2090,7 @@ $at-text-faint: #2c4060;
     }
 
     .auto-trades-mode-btn {
-        padding: 0.8rem 1rem;
+        padding: 0.6rem 0.8rem;
 
         &__desc {
             display: none;
