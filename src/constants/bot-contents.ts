@@ -21,6 +21,7 @@ export const DBOT_TABS: TDashboardTabIndex = Object.freeze({
     SCANNER: 6,
     ANALYSIS_TOOL: 7,
     SPEED_BOT: 8,
+    AVIATOR_ACCUMULATOR: 9,
 });
 
 export const MAX_STRATEGIES = 10;
@@ -35,6 +36,7 @@ export const TAB_IDS = [
     'id-scanner',
     'id-analysistool',
     'id-speed-bot',
+    'id-aviator-accumulator',
 ];
 
 export const DEBOUNCE_INTERVAL_TIME = 500;
