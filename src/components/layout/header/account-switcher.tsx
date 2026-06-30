@@ -8,7 +8,7 @@ import { api_base } from '@/external/bot-skeleton/services/api/api-base';
 import { useApiBase } from '@/hooks/useApiBase';
 import { useStore } from '@/hooks/useStore';
 import { isDemoAccount } from '@/utils/account-helpers';
-import { DISPLAY_CURRENCIES, formatDisplayBalanceValue, resolveDisplayCurrency, TDisplayCurrency } from '@/utils/display-currency';
+import { CURRENCY_FLAGS, DISPLAY_CURRENCIES, formatDisplayBalanceValue, getCurrencyFlag, resolveDisplayCurrency, TDisplayCurrency } from '@/utils/display-currency';
 import { Localize } from '@deriv-com/translations';
 import { TAccountSwitcher } from './common/types';
 import AccountInfoWrapper from './account-info-wrapper';
@@ -147,7 +147,7 @@ const AccountSwitcher = observer(({ activeAccount }: TAccountSwitcher) => {
         balance ?? 0,
         currency || 'USD',
         selectedDisplayCurrency,
-        client?.usd_kes_rate
+        client?.usd_rates
     );
 
     const handleTabSelect = useCallback((tab: 'real' | 'demo') => {
@@ -222,6 +222,9 @@ const AccountSwitcher = observer(({ activeAccount }: TAccountSwitcher) => {
                         aria-expanded={isCurrencyMenuOpen}
                         aria-haspopup='listbox'
                     >
+                        <span className='acc-info__currency-flag' aria-hidden='true'>
+                            {CURRENCY_FLAGS[selectedDisplayCurrency]}
+                        </span>
                         {selectedDisplayCurrency}
                         <svg width='10' height='10' viewBox='0 0 10 10' fill='none' aria-hidden='true'>
                             <path d='M2 3.5L5 6.5L8 3.5' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
@@ -238,6 +241,9 @@ const AccountSwitcher = observer(({ activeAccount }: TAccountSwitcher) => {
                                     })}
                                     onClick={() => handleDisplayCurrencySelect(option)}
                                 >
+                                    <span className='acc-info__currency-flag' aria-hidden='true'>
+                                        {CURRENCY_FLAGS[option]}
+                                    </span>
                                     {option}
                                 </button>
                             ))}
@@ -281,7 +287,14 @@ const AccountSwitcher = observer(({ activeAccount }: TAccountSwitcher) => {
                                     {!currency ? (
                                         <Localize i18n_default_text='No currency assigned' />
                                     ) : (
-                                        headerBalance
+                                        <>
+                                            {!isVirtual && selectedDisplayCurrency !== 'USD' && (
+                                                <span className='acc-info__balance-flag' aria-hidden='true'>
+                                                    {getCurrencyFlag(selectedDisplayCurrency)}
+                                                </span>
+                                            )}
+                                            {headerBalance}
+                                        </>
                                     )}
                                 </p>
                             </div>
@@ -370,12 +383,19 @@ const AccountSwitcher = observer(({ activeAccount }: TAccountSwitcher) => {
                                     </span>
                                     <Text as='span' size='xs' weight='bold' className='acc-dropdown__balance'>
                                         {account.currency ? (
-                                            formatDisplayBalanceValue(
-                                                account.balance,
-                                                account.currency,
-                                                selectedDisplayCurrency,
-                                                client?.usd_kes_rate
-                                            )
+                                            <>
+                                                {selectedDisplayCurrency !== 'USD' && (
+                                                    <span className='acc-dropdown__balance-flag' aria-hidden='true'>
+                                                        {getCurrencyFlag(selectedDisplayCurrency)}
+                                                    </span>
+                                                )}
+                                                {formatDisplayBalanceValue(
+                                                    account.balance,
+                                                    account.currency,
+                                                    selectedDisplayCurrency,
+                                                    client?.usd_rates
+                                                )}
+                                            </>
                                         ) : (
                                             <Localize i18n_default_text='No currency assigned' />
                                         )}
@@ -431,7 +451,7 @@ const AccountSwitcher = observer(({ activeAccount }: TAccountSwitcher) => {
                                                 account.balance,
                                                 account.currency,
                                                 selectedDisplayCurrency,
-                                                client?.usd_kes_rate
+                                                client?.usd_rates
                                             )}
                                         </Text>
                                     </div>
