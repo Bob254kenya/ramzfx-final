@@ -50,6 +50,7 @@ import ManualTrading from '../manual-trading';
 import RunStrategy from '../dashboard/run-strategy';
 import Analysistool from '../analysistool';
 import Scanner from '../scanner';
+import SpeedBot from '../speed-bot';
 import './main.scss';
 
 // ==================== SOCIAL POPUP COMPONENT ====================
@@ -305,7 +306,7 @@ const AppWrapper = observer(() => {
         [key: string]: string;
     };
     const { clear } = summary_card;
-    const { BOT_BUILDER, BOT_IDEAS, DASHBOARD, AUTO_TRADES, MANUAL_TRADING, SCANNER } = DBOT_TABS;
+    const { BOT_BUILDER, BOT_IDEAS, DASHBOARD, AUTO_TRADES, MANUAL_TRADING, SCANNER, SPEED_BOT } = DBOT_TABS;
     const init_render = React.useRef(true);
     const hash = [
         'bot_ideas',
@@ -316,16 +317,19 @@ const AppWrapper = observer(() => {
         'manual_trading',
         'scanner',
         'analysistool',
+        'speed_bot',
     ];
     const show_bot_ideas = isDomainFeatureEnabled('botIdeas');
     const show_auto_trades = isDomainFeatureEnabled('autoTrades');
     const show_manual_trading = isDomainFeatureEnabled('manualTrading');
     const show_scanner = isDomainFeatureEnabled('scanner');
+    const show_speed_bot = isDomainFeatureEnabled('speedBot');
     const isMainTabVisible = (tab_index: number) => {
         if (tab_index === BOT_IDEAS) return show_bot_ideas;
         if (tab_index === AUTO_TRADES) return show_auto_trades;
         if (tab_index === MANUAL_TRADING) return show_manual_trading;
         if (tab_index === SCANNER) return show_scanner;
+        if (tab_index === SPEED_BOT) return show_speed_bot;
         return true;
     };
     const { isDesktop } = useDevice();
@@ -718,6 +722,19 @@ const AppWrapper = observer(() => {
                             >
                                 <Analysistool />
                             </div>
+                            {show_speed_bot ? (
+                                <div
+                                    label={
+                                        <>
+                                            <LabelPairedChartTrendUpCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
+                                            <Localize i18n_default_text='Speed Bot' />
+                                        </>
+                                    }
+                                    id='id-speed-bot'
+                                >
+                                    <SpeedBot />
+                                </div>
+                            ) : null}
                         </Tabs>
                         {!isDesktop && right_tab_shadow && <span className='tabs-shadow tabs-shadow--right' />}
                     </div>
