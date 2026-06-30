@@ -51,6 +51,7 @@ import RunStrategy from '../dashboard/run-strategy';
 import Analysistool from '../analysistool';
 import Scanner from '../scanner';
 import SpeedBot from '../speed-bot';
+import AviatorAccumulator from '../aviator-accumulator';
 import './main.scss';
 
 // ==================== SOCIAL POPUP COMPONENT ====================
@@ -318,6 +319,7 @@ const AppWrapper = observer(() => {
         'scanner',
         'analysistool',
         'speed_bot',
+        'aviator_accumulator',
     ];
     const show_bot_ideas = isDomainFeatureEnabled('botIdeas');
     const show_auto_trades = isDomainFeatureEnabled('autoTrades');
@@ -735,6 +737,17 @@ const AppWrapper = observer(() => {
                                     <SpeedBot />
                                 </div>
                             ) : null}
+                            <div
+                                label={
+                                    <>
+                                        <LabelPairedChartTrendUpCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
+                                        <Localize i18n_default_text='Aviator Accumulator' />
+                                    </>
+                                }
+                                id='id-aviator-accumulator'
+                            >
+                                <AviatorAccumulator />
+                            </div>
                         </Tabs>
                         {!isDesktop && right_tab_shadow && <span className='tabs-shadow tabs-shadow--right' />}
                     </div>
