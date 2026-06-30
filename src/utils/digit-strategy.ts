@@ -67,6 +67,88 @@ export const DIGIT_STRATEGIES: Record<DigitStrategyId, DigitStrategyDefinition> 
     },
 };
 
+export type TDigitContractType = 'Even' | 'Odd' | 'Over' | 'Under' | 'Matches' | 'Differs';
+
+export type TOwnStrategy = {
+    barrier?: number; // 0-9, used for Over / Under / Matches / Differs
+    contractType: TDigitContractType;
+};
+
+export type TMarketRecommendation = {
+    evenOdd: { evenPercent: number; oddPercent: number; pick: 'Even' | 'Odd' };
+    matchesDiffers: { leastLikelyDigit: number; mostLikelyDigit: number };
+    overUnder: { barrier: number; overPercent: number; pick: 'Over' | 'Under'; underPercent: number };
+};
+
+// Builds a full "research" snapshot across every digit-contract family from the
+// current digit-percentage distribution, so the UI can show all contract types
+// at once instead of only Even/Odd.
+export const buildMarketRecommendation = (
+    digitPercentages: Record<number, number>,
+    overUnderBarrier = 5
+): TMarketRecommendation => {
+    const evenPercent = [0, 2, 4, 6, 8].reduce((sum, digit) => sum + (digitPercentages[digit] ?? 0), 0);
+    const oddPercent = Math.max(0, 100 - evenPercent);
+
+    let overPercent = 0;
+    let underPercent = 0;
+    let mostLikelyDigit = 0;
+    let leastLikelyDigit = 0;
+
+    Object.entries(digitPercentages).forEach(([digitKey, percent]) => {
+        const digit = Number(digitKey);
+        if (digit > overUnderBarrier) overPercent += percent;
+        if (digit < overUnderBarrier) underPercent += percent;
+        if (percent > (digitPercentages[mostLikelyDigit] ?? -1)) mostLikelyDigit = digit;
+        if (percent < (digitPercentages[leastLikelyDigit] ?? 101)) leastLikelyDigit = digit;
+    });
+
+    return {
+        evenOdd: { evenPercent: toPercent(evenPercent), oddPercent: toPercent(oddPercent), pick: evenPercent >= oddPercent ? 'Even' : 'Odd' },
+        matchesDiffers: { leastLikelyDigit, mostLikelyDigit },
+        overUnder: {
+            barrier: overUnderBarrier,
+            overPercent: toPercent(overPercent),
+            pick: overPercent >= underPercent ? 'Over' : 'Under',
+            underPercent: toPercent(underPercent),
+        },
+    };
+};
+
+// Compares a user's own saved strategy (contract type + barrier) against the
+// live market recommendation, and reports whether the two currently "Match" or "Differ".
+export const compareOwnStrategy = (
+    ownStrategy: TOwnStrategy,
+    recommendation: TMarketRecommendation
+): { matches: boolean; recommendedPick: string } => {
+    switch (ownStrategy.contractType) {
+        case 'Even':
+        case 'Odd':
+            return {
+                matches: recommendation.evenOdd.pick === ownStrategy.contractType,
+                recommendedPick: recommendation.evenOdd.pick,
+            };
+        case 'Over':
+        case 'Under':
+            return {
+                matches: recommendation.overUnder.pick === ownStrategy.contractType,
+                recommendedPick: recommendation.overUnder.pick,
+            };
+        case 'Matches':
+            return {
+                matches: ownStrategy.barrier === recommendation.matchesDiffers.mostLikelyDigit,
+                recommendedPick: `Digit ${recommendation.matchesDiffers.mostLikelyDigit}`,
+            };
+        case 'Differs':
+            return {
+                matches: ownStrategy.barrier !== recommendation.matchesDiffers.mostLikelyDigit,
+                recommendedPick: `Avoid digit ${recommendation.matchesDiffers.mostLikelyDigit}`,
+            };
+        default:
+            return { matches: false, recommendedPick: '—' };
+    }
+};
+
 const toPercent = (value: number) => Math.round(value * 100) / 100;
 
 export const calculateDigitPercentagesFromDigits = (digits: number[]): Record<number, number> => {
