@@ -302,3 +302,120 @@
     color: #e0413f;
     font-weight: 600;
 }
+
+// ==================== Research: all contract types ====================
+
+.speed-bot-research {
+    background: #eef2ff;
+    border-radius: 16px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    &__title {
+        font-weight: 700;
+        font-size: 15px;
+        color: #1a1f29;
+    }
+
+    &__grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    &__item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        background: #ffffff;
+        border-radius: 10px;
+        padding: 8px 10px;
+        font-size: 12px;
+        color: #5b6573;
+
+        strong {
+            font-size: 15px;
+            color: #1a1f29;
+        }
+    }
+
+    &__signals {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+}
+
+.speed-bot-signal {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: #5b6573;
+    font-weight: 600;
+
+    &--qualified {
+        background: rgba(31, 157, 85, 0.1);
+        color: #1f9d55;
+    }
+
+    &--ready {
+        background: #1f9d55;
+        color: #ffffff;
+    }
+}
+
+// ==================== Own strategy: match / differs ====================
+
+.speed-bot-own-strategy {
+    background: #fff7e6;
+    border-radius: 16px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    &__title {
+        font-weight: 700;
+        font-size: 15px;
+        color: #1a1f29;
+    }
+
+    &__row {
+        display: flex;
+        gap: 10px;
+    }
+
+    &__barrier {
+        width: 70px;
+        border: 1px solid #e2e5ea;
+        border-radius: 12px;
+        padding: 14px 12px;
+        font-size: 16px;
+        text-align: center;
+        color: #1a1f29;
+        background: #ffffff;
+    }
+
+    &__badge {
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-size: 13px;
+        font-weight: 600;
+
+        &--match {
+            background: rgba(31, 157, 85, 0.12);
+            color: #1f9d55;
+        }
+
+        &--differ {
+            background: rgba(224, 65, 63, 0.1);
+            color: #e0413f;
+        }
+    }
+}
