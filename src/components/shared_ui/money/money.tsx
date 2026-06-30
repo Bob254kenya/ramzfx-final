@@ -26,7 +26,7 @@ const Money = ({
         amount,
         currency,
         client?.display_currency || 'USD',
-        client?.usd_kes_rate
+        client?.usd_rates
     );
     let sign = '';
     if (Number(displayAmount) && (Number(displayAmount) < 0 || has_sign)) {
