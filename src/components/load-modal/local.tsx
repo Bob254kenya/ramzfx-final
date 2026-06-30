@@ -16,7 +16,7 @@ import WorkspaceControl from './workspace-control';
 const LocalComponent = observer(() => {
     const { dashboard, load_modal, blockly_store } = useStore();
     const { active_tab, active_tour } = dashboard;
-    const { handleFileChange, loaded_local_file, setLoadedLocalFile, imported_strategy_type, is_open_button_loading } =
+    const { handleFileChange, loaded_local_file, setLoadedLocalFile, imported_strategy_type, is_open_button_loading, is_market_analyser_enabled, setMarketAnalyserEnabled } =
         load_modal;
 
     const file_input_ref = React.useRef<HTMLInputElement>(null);
@@ -96,6 +96,19 @@ const LocalComponent = observer(() => {
                     icon={<LegacyInfo1pxIcon fill='#e18d00' iconSize='xs' />}
                     className='load-strategy__section_message'
                 />
+
+                <label className='load-strategy__analyser-toggle' htmlFor='ramzfx-market-analyser-toggle'>
+                    <input
+                        id='ramzfx-market-analyser-toggle'
+                        type='checkbox'
+                        checked={is_market_analyser_enabled}
+                        onChange={e => setMarketAnalyserEnabled(e.target.checked)}
+                        data-testid='dt_market_analyser_toggle'
+                    />
+                    <span className='load-strategy__analyser-toggle-text'>
+                        <Localize i18n_default_text='Add RamzFX Market Analyser to uploaded bots' />
+                    </span>
+                </label>
 
                 <div
                     data-testid='dt__local-dropzone-area'
