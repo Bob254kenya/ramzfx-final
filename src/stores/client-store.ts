@@ -305,7 +305,24 @@ export default class ClientStore {
     };
 
     getDemoBalanceOverride = (_loginid?: string) => {
-        return undefined;
+        const resolvedLoginId = _loginid || this.loginid || getAccountId() || '';
+        if (!resolvedLoginId) return undefined;
+
+        if (!this.demo_balance_overrides[resolvedLoginId]) {
+            try {
+                const raw = localStorage.getItem(DEMO_BALANCE_OVERRIDES_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw) as Record<string, TDemoBalanceOverride>;
+                    this.demo_balance_overrides = parsed;
+                }
+            } catch (error) {
+                ErrorLogger.log('Failed to hydrate demo balance overrides', error, {
+                    context: 'client-store.getDemoBalanceOverride',
+                });
+            }
+        }
+
+        return this.demo_balance_overrides[resolvedLoginId];
     };
 
     getDisplayBalanceAmount = (loginid?: string) => {
@@ -343,10 +360,66 @@ export default class ClientStore {
         return this.getDisplayBalanceAmount(resolvedLoginId) + 1e-9 >= normalizedRequiredAmount;
     };
 
-    resetDemoBalance = (_loginid: string, _custom_balance: number, _currency?: string) => {
-        localStorage.removeItem(DEMO_BALANCE_OVERRIDES_KEY);
-        this.demo_balance_overrides = {};
-        return false;
+    resetDemoBalance = (loginid: string, custom_balance: number, currency?: string) => {
+        if (!loginid || !isDemoAccount(loginid)) return false;
+
+        const normalizedAmount = Number(custom_balance);
+        if (!Number.isFinite(normalizedAmount) || normalizedAmount < 0) return false;
+
+        const resolvedCurrency =
+            currency ||
+            this.accounts[loginid]?.currency ||
+            this.account_list.find(account => account.loginid === loginid)?.currency ||
+            'USD';
+
+        const serverBalance = this.server_balances[loginid] ?? this.accounts[loginid]?.balance ?? 0;
+
+        const override: TDemoBalanceOverride = {
+            baseline_server_balance: serverBalance,
+            currency: resolvedCurrency,
+            custom_balance: normalizedAmount,
+            last_known_server_balance: serverBalance,
+        };
+
+        this.demo_balance_overrides = {
+            ...this.demo_balance_overrides,
+            [loginid]: override,
+        };
+
+        try {
+            localStorage.setItem(DEMO_BALANCE_OVERRIDES_KEY, JSON.stringify(this.demo_balance_overrides));
+        } catch (error) {
+            ErrorLogger.log('Failed to persist demo balance override', error, {
+                context: 'client-store.resetDemoBalance',
+            });
+            return false;
+        }
+
+        if (this.accounts[loginid]) {
+            this.accounts[loginid] = {
+                ...this.accounts[loginid],
+                balance: normalizedAmount,
+                currency: resolvedCurrency,
+            };
+        }
+
+        if (this.account_list.length) {
+            this.account_list = this.account_list.map(account =>
+                account.loginid === loginid
+                    ? { ...account, balance: normalizedAmount, currency: resolvedCurrency }
+                    : account
+            );
+            setAccountList(this.account_list);
+        }
+
+        if (loginid === this.loginid || loginid === getAccountId()) {
+            this.balance = normalizedAmount.toString();
+            if (resolvedCurrency) this.currency = resolvedCurrency;
+        }
+
+        this.server_balances[loginid] = serverBalance;
+
+        return true;
     };
 
     applyBalanceUpdate = (loginid: string, currency: string, server_balance: number) => {
@@ -641,4 +714,4 @@ export default class ClientStore {
             globalObserver.setState({ 'client.store': null, 'client.store.id': null });
         }
     }
-    }
+            }
