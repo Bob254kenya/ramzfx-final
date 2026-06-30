@@ -1,1 +1,459 @@
+.aviator-page {
+    display: flex;
+    width: 100%;
+    height: var(--tab-content-height);
+    min-height: var(--tab-content-height);
+    flex: 1 1 auto;
+    justify-content: center;
+    padding: 24px 16px 7% 16px;
+    overflow: auto;
+    background: #f4f6f8;
 
+    * {
+        box-sizing: border-box;
+    }
+}
+
+.aviator-layout {
+    width: 100%;
+    max-width: 980px;
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.aviator-main {
+    flex: 1 1 480px;
+    min-width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+// ==================== Aviator scene ====================
+
+.aviator-scene {
+    position: relative;
+    width: 100%;
+    height: 320px;
+    border-radius: 20px;
+    overflow: hidden;
+    background: radial-gradient(circle at 30% 100%, #1c2e52 0%, #0c1326 65%, #060a16 100%);
+    box-shadow: 0 10px 30px rgba(8, 12, 28, 0.45);
+    transition: box-shadow 0.3s ease;
+}
+
+.aviator-scene--crashed {
+    box-shadow: 0 0 0 3px #e0335c inset, 0 10px 30px rgba(224, 51, 92, 0.45);
+}
+
+.aviator-scene--cashed {
+    box-shadow: 0 0 0 3px #28c76f inset, 0 10px 30px rgba(40, 199, 111, 0.45);
+}
+
+.aviator-scene__grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 32px 32px;
+    opacity: 0.6;
+}
+
+.aviator-multiplier {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 38px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+    z-index: 3;
+}
+
+.aviator-jet-track {
+    position: absolute;
+    inset: 0;
+}
+
+.aviator-flight-path {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+
+    path {
+        fill: none;
+        stroke: rgba(200, 164, 93, 0.35);
+        stroke-width: 0.6;
+        stroke-dasharray: 2 2;
+    }
+}
+
+.aviator-jet {
+    position: absolute;
+    transform: translate(-50%, 50%);
+    transition:
+        left 0.4s linear,
+        bottom 0.4s linear;
+    z-index: 2;
+}
+
+.aviator-jet__body {
+    display: inline-block;
+    font-size: 30px;
+    transform: rotate(-40deg);
+    filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5));
+}
+
+.aviator-jet__trail {
+    position: absolute;
+    right: 50%;
+    top: 60%;
+    width: 60px;
+    height: 6px;
+    background: linear-gradient(90deg, rgba(255, 184, 76, 0) 0%, rgba(255, 184, 76, 0.55) 100%);
+    border-radius: 4px;
+    transform: rotate(20deg);
+}
+
+.aviator-scene--flying .aviator-jet__body {
+    animation: aviator-jet-wobble 0.6s ease-in-out infinite alternate;
+}
+
+.aviator-scene--crashed .aviator-jet {
+    animation: aviator-jet-flyoff 0.9s cubic-bezier(0.55, 0, 1, 0.45) forwards;
+}
+
+.aviator-scene--crashed .aviator-jet__body {
+    transform: rotate(35deg);
+}
+
+.aviator-scene--cashed .aviator-jet {
+    animation: aviator-jet-boost 0.6s ease-out forwards;
+}
+
+@keyframes aviator-jet-wobble {
+    from {
+        transform: translate(-50%, 50%) translateY(0);
+    }
+    to {
+        transform: translate(-50%, 50%) translateY(-6px);
+    }
+}
+
+@keyframes aviator-jet-flyoff {
+    0% {
+        opacity: 1;
+        transform: translate(-50%, 50%) scale(1) rotate(0deg);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(120px, -160px) scale(0.55) rotate(35deg);
+    }
+}
+
+@keyframes aviator-jet-boost {
+    0% {
+        transform: translate(-50%, 50%) scale(1);
+    }
+    50% {
+        transform: translate(-50%, 50%) scale(1.25);
+    }
+    100% {
+        transform: translate(-50%, 50%) scale(1);
+    }
+}
+
+.aviator-result-badge {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 14px;
+    z-index: 3;
+    white-space: nowrap;
+}
+
+.aviator-result-badge--crashed {
+    background: rgba(224, 51, 92, 0.18);
+    color: #ff7a96;
+    border: 1px solid rgba(224, 51, 92, 0.5);
+}
+
+.aviator-result-badge--cashed {
+    background: rgba(40, 199, 111, 0.18);
+    color: #5be79b;
+    border: 1px solid rgba(40, 199, 111, 0.5);
+}
+
+.aviator-result-badge--ready {
+    background: rgba(200, 164, 93, 0.16);
+    color: #c8a45d;
+    border: 1px solid rgba(200, 164, 93, 0.45);
+}
+
+// ==================== Breakout history ====================
+
+.aviator-history {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 14px 16px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.aviator-history__title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 10px;
+}
+
+.aviator-history__track {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.aviator-history__empty {
+    color: #9aa1ad;
+    font-size: 13px;
+    padding: 6px 0;
+}
+
+.aviator-chip {
+    flex: 0 0 auto;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 13px;
+    color: #ffffff;
+}
+
+.aviator-chip--loss.aviator-chip--low {
+    background: #b3263e;
+}
+
+.aviator-chip--loss.aviator-chip--mid {
+    background: #d7415c;
+}
+
+.aviator-chip--loss.aviator-chip--high {
+    background: #e0335c;
+}
+
+.aviator-chip--loss.aviator-chip--epic {
+    background: #8b2bcf;
+}
+
+.aviator-chip--win {
+    background: #28c76f;
+}
+
+// ==================== Footer / status ====================
+
+.aviator-footer {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 14px 16px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+    font-size: 14px;
+    color: #4b5563;
+}
+
+.aviator-pnl--positive {
+    color: #28c76f;
+}
+
+.aviator-pnl--negative {
+    color: #e0335c;
+}
+
+.aviator-status {
+    margin: 0;
+    font-size: 13px;
+    color: #1a1f29;
+    background: #fff;
+    border-radius: 12px;
+    padding: 10px 14px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.aviator-error {
+    margin: 0;
+    font-size: 13px;
+    color: #e0335c;
+    background: #fff5f7;
+    border: 1px solid rgba(224, 51, 92, 0.3);
+    border-radius: 12px;
+    padding: 10px 14px;
+}
+
+// ==================== Strategy panel ====================
+
+.aviator-panel {
+    flex: 1 1 320px;
+    min-width: 280px;
+    max-width: 360px;
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 20px;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.aviator-panel__section {
+    display: flex;
+    gap: 12px;
+
+    .aviator-field {
+        flex: 1 1 0;
+    }
+}
+
+.aviator-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #4b5563;
+
+    input,
+    .aviator-select {
+        appearance: none;
+        background: #ffffff;
+        border: 1px solid #e2e5ea;
+        border-radius: 12px;
+        padding: 12px 14px;
+        font-size: 14px;
+        color: #1a1f29;
+        font-weight: 500;
+
+        &:disabled {
+            opacity: 0.6;
+        }
+    }
+}
+
+.aviator-divider {
+    height: 1px;
+    background: #eef0f3;
+    margin: 2px 0;
+}
+
+.aviator-hint {
+    margin: -6px 0 0 0;
+    font-size: 12px;
+    color: #9aa1ad;
+    line-height: 1.4;
+}
+
+.aviator-tp-sl-hint {
+    margin: 0;
+    font-size: 12px;
+    color: #9aa1ad;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.aviator-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a1f29;
+}
+
+.aviator-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 26px;
+
+    input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+}
+
+.aviator-switch__knob {
+    position: absolute;
+    inset: 0;
+    background: #d8dce3;
+    border-radius: 999px;
+    transition: background 0.2s ease;
+
+    &::before {
+        content: '';
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 20px;
+        height: 20px;
+        background: #ffffff;
+        border-radius: 50%;
+        transition: transform 0.2s ease;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+}
+
+.aviator-switch--on .aviator-switch__knob {
+    background: #c8a45d;
+
+    &::before {
+        transform: translateX(18px);
+    }
+}
+
+.aviator-button {
+    border: none;
+    border-radius: 14px;
+    padding: 16px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    color: #ffffff;
+    transition: opacity 0.2s ease;
+
+    &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+}
+
+.aviator-button--start {
+    background: linear-gradient(135deg, #c8a45d, #e0b96c);
+}
+
+.aviator-button--stop {
+    background: linear-gradient(135deg, #e0335c, #b3263e);
+}
+
+@media (max-width: 760px) {
+    .aviator-layout {
+        flex-direction: column;
+    }
+
+    .aviator-panel {
+        max-width: 100%;
+    }
+}
