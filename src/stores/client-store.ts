@@ -8,7 +8,7 @@ import { removeCookies } from '@/components/shared/utils/storage/storage';
 import { observer as globalObserver, observer } from '@/external/bot-skeleton';
 import { api_base } from '@/external/bot-skeleton/services/api/api-base';
 import { API_BASE } from '@/utils/api-base';
-import { resolveDisplayCurrency, sanitizeUsdKesRate, TDisplayCurrency } from '@/utils/display-currency';
+import { resolveDisplayCurrency, sanitizeRate, TDisplayCurrency, TUsdRates } from '@/utils/display-currency';
 import { ErrorLogger } from '@/utils/error-logger';
 import { clearApiTokenSession } from '@/utils/api-token-permissions';
 import type { Balance } from '@deriv/api-types';
@@ -36,7 +36,11 @@ export default class ClientStore {
     balance = '0';
     currency = 'AUD';
     display_currency: TDisplayCurrency = resolveDisplayCurrency(localStorage.getItem('display_currency'), 'USD');
-    usd_kes_rate = sanitizeUsdKesRate(null);
+    usd_rates: TUsdRates = {};
+    /** @deprecated use usd_rates.KES — kept for backwards compatibility */
+    get usd_kes_rate() {
+        return sanitizeRate(this.usd_rates.KES, 129);
+    }
     exchange_rate_updated_at = '';
     is_logged_in = false;
     is_account_regenerating = false;
@@ -120,13 +124,14 @@ export default class ClientStore {
             demo_balance_overrides: observable,
             display_currency: observable,
             exchange_rate_updated_at: observable,
-            usd_kes_rate: observable,
+            usd_rates: observable,
 
             is_logged_in: observable,
             is_account_regenerating: observable,
             loginid: observable,
             is_logging_out: observable,
             active_accounts: computed,
+            usd_kes_rate: computed,
             is_bot_allowed: computed,
 
             is_eu_or_multipliers_only: computed,
@@ -262,15 +267,15 @@ export default class ClientStore {
         this.display_currency = resolveDisplayCurrency(currency, 'USD');
         localStorage.setItem('display_currency', this.display_currency);
 
-        if (this.display_currency === 'KES') {
+        if (this.display_currency !== 'USD') {
             this.startExchangeRateAutoRefresh();
         } else {
             this.stopExchangeRateAutoRefresh();
         }
     };
 
-    setExchangeRateData = (rate: number, updated_at = '') => {
-        this.usd_kes_rate = sanitizeUsdKesRate(rate);
+    setExchangeRateData = (currency: Exclude<TDisplayCurrency, 'USD'>, rate: number, updated_at = '') => {
+        this.usd_rates = { ...this.usd_rates, [currency]: sanitizeRate(rate, this.usd_rates[currency] ?? undefined) };
         this.exchange_rate_updated_at = updated_at;
     };
 
@@ -377,30 +382,37 @@ export default class ClientStore {
     };
 
     fetchUsdKesRate = async () => {
+        await this.fetchExchangeRate(this.display_currency);
+    };
+
+    fetchExchangeRate = async (currency: TDisplayCurrency) => {
+        if (currency === 'USD') return;
         try {
-            const response = await fetch(`${API_BASE}/exchange-rates/usd-kes`);
+            const pair = `usd-${currency.toLowerCase()}`;
+            const response = await fetch(`${API_BASE}/exchange-rates/${pair}`);
             if (!response.ok) {
                 throw new Error(`Exchange rate request failed with ${response.status}`);
             }
 
             const data = await response.json();
-            this.setExchangeRateData(data?.rate, data?.updated_at || '');
+            this.setExchangeRateData(currency, data?.rate, data?.updated_at || '');
         } catch (error) {
-            ErrorLogger.log('Failed to fetch USD/KES rate', error, {
-                context: 'client-store.fetchUsdKesRate',
+            ErrorLogger.log(`Failed to fetch USD/${currency} rate`, error, {
+                context: 'client-store.fetchExchangeRate',
             });
         }
     };
 
     startExchangeRateAutoRefresh = () => {
-        this.fetchUsdKesRate();
+        const currency = this.display_currency;
+        this.fetchExchangeRate(currency);
 
         if (this.exchange_rate_refresh_timer) {
             window.clearInterval(this.exchange_rate_refresh_timer);
         }
 
         this.exchange_rate_refresh_timer = window.setInterval(() => {
-            this.fetchUsdKesRate();
+            this.fetchExchangeRate(this.display_currency);
         }, 10 * 60 * 1000);
     };
 
@@ -629,4 +641,4 @@ export default class ClientStore {
             globalObserver.setState({ 'client.store': null, 'client.store.id': null });
         }
     }
-}
+    }
