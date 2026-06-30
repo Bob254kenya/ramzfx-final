@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { DBOT_TABS } from '@/constants/bot-contents';
-import { api_base } from '@/external/bot-skeleton';
+import { api_base, MessageTypes } from '@/external/bot-skeleton';
 import { useStore } from '@/hooks/useStore';
 import { SUPPORTED_VOLATILITY_MARKETS } from '@/utils/digit-strategy';
 import { getLastDigitFromQuote, isExpectedStreamInterruption } from '@/utils/market-data';
@@ -23,6 +23,8 @@ const DEFAULT_TICKS = '1';
 const DEFAULT_STAKE = '0.5';
 const DEFAULT_MARTINGALE_MULTIPLIER = '1.15';
 const DEFAULT_SYMBOL = 'R_100';
+const DEFAULT_TAKE_PROFIT = '10';
+const DEFAULT_STOP_LOSS = '10';
 
 const getQuoteFromTick = (data: any): TTickPoint | null => {
     const quote = Number(data?.tick?.quote);
@@ -40,7 +42,7 @@ const cleanMoneyInput = (value: string) => value.replace(/[^\d.]/g, '').replace(
 const cleanIntegerInput = (value: string) => value.replace(/[^\d]/g, '');
 
 const SpeedBot = observer(() => {
-    const { client, dashboard, run_panel } = useStore();
+    const { client, dashboard, run_panel, journal, transactions, summary_card } = useStore();
     const { active_tab } = dashboard;
     const showSpeedBot = active_tab === DBOT_TABS.SPEED_BOT;
 
@@ -56,6 +58,10 @@ const SpeedBot = observer(() => {
     const [useMartingale, setUseMartingale] = useState(false);
     const [martingaleMultiplierInput, setMartingaleMultiplierInput] = useState(DEFAULT_MARTINGALE_MULTIPLIER);
     const [recoveryMode, setRecoveryMode] = useState(false);
+    const [autoAnalyze, setAutoAnalyze] = useState(false);
+    const [takeProfitInput, setTakeProfitInput] = useState(DEFAULT_TAKE_PROFIT);
+    const [stopLossInput, setStopLossInput] = useState(DEFAULT_STOP_LOSS);
+    const [sessionPnl, setSessionPnl] = useState(0);
     const [ticksProcessed, setTicksProcessed] = useState(0);
     const [statusMessage, setStatusMessage] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
@@ -73,6 +79,10 @@ const SpeedBot = observer(() => {
     const martingaleMultiplierRef = useRef(1.15);
     const recoveryModeRef = useRef(recoveryMode);
     const selectedSymbolRef = useRef(selectedSymbol);
+    const autoAnalyzeRef = useRef(autoAnalyze);
+    const takeProfitRef = useRef(parseFloat(DEFAULT_TAKE_PROFIT));
+    const stopLossRef = useRef(parseFloat(DEFAULT_STOP_LOSS));
+    const sessionPnlRef = useRef(0);
 
     const baseStakeRef = useRef(0);
     const currentStakeRef = useRef(0);
@@ -97,6 +107,17 @@ const SpeedBot = observer(() => {
     useEffect(() => {
         selectedSymbolRef.current = selectedSymbol;
     }, [selectedSymbol]);
+    useEffect(() => {
+        autoAnalyzeRef.current = autoAnalyze;
+    }, [autoAnalyze]);
+    useEffect(() => {
+        const parsed = parseFloat(takeProfitInput);
+        takeProfitRef.current = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }, [takeProfitInput]);
+    useEffect(() => {
+        const parsed = parseFloat(stopLossInput);
+        stopLossRef.current = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }, [stopLossInput]);
     useEffect(() => {
         const parsed = parseFloat(martingaleMultiplierInput);
         martingaleMultiplierRef.current = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
@@ -213,6 +234,54 @@ const SpeedBot = observer(() => {
         };
     }, [loadMarketData, unsubscribe]);
 
+    // ==================== Transactions & Journal ====================
+
+    const pushContract = useCallback(
+        (data: Record<string, any>) => {
+            try {
+                transactions.pushTransaction(data as any);
+                run_panel?.onBotContractEvent?.(data as any);
+                summary_card?.onBotContractEvent?.(data as any);
+            } catch {
+                // Stores may not be ready yet; safe to ignore.
+            }
+        },
+        [run_panel, summary_card, transactions]
+    );
+
+    const logJournal = useCallback(
+        (message: string, message_type: string = MessageTypes.NOTIFY) => {
+            try {
+                journal?.pushMessage?.(message, message_type, '');
+            } catch {
+                // Journal may not be ready yet; safe to ignore.
+            }
+        },
+        [journal]
+    );
+
+    // Analyses the most recent ticks and returns the statistically dominant
+    // Even/Odd side, logging the analysis snapshot to the Journal.
+    const analyzeAndPickTradeType = useCallback((): TEvenOdd => {
+        const symbol = selectedSymbolRef.current;
+        const digits = ticksRef.current.slice(-STATS_WINDOW).map(tick => getLastDigitFromQuote(tick.quote, symbol));
+        const total = digits.length;
+        const evenCount = digits.filter(digit => digit % 2 === 0).length;
+        const evenPct = total ? (evenCount / total) * 100 : 50;
+        const oddPct = total ? 100 - evenPct : 50;
+        const lastDigit = digits[digits.length - 1];
+        const chosen: TEvenOdd = evenPct >= oddPct ? 'Even' : 'Odd';
+
+        logJournal(
+            `📊 Last tick analysis (${total} ticks on ${symbol}): Even ${evenPct.toFixed(1)}% / Odd ${oddPct.toFixed(1)}%, last digit ${
+                lastDigit ?? '—'
+            } → Auto-trading ${chosen}`,
+            MessageTypes.NOTIFY
+        );
+
+        return chosen;
+    }, [logJournal]);
+
     // ==================== Trading ====================
 
     const buildTradeParameters = useCallback(
@@ -230,6 +299,10 @@ const SpeedBot = observer(() => {
 
     const runSingleTrade = useCallback(
         async (type: TEvenOdd, stake: number, durationTicks: number): Promise<number> => {
+            const symbol = selectedSymbolRef.current;
+            const contractTypeCode = type === 'Even' ? 'DIGITEVEN' : 'DIGITODD';
+            const tradeStartTime = Math.floor(Date.now() / 1000);
+
             const buy = await buyContractForUi({
                 parameters: buildTradeParameters(type, stake, durationTicks),
                 price: stake,
@@ -239,20 +312,39 @@ const SpeedBot = observer(() => {
             const fallback = {
                 buy_price: buy.buy_price,
                 contract_id: buy.contract_id,
-                contract_type: type === 'Even' ? 'DIGITEVEN' : 'DIGITODD',
+                transaction_ids: { buy: buy.transaction_id },
+                date_start: tradeStartTime,
+                display_name: symbol,
+                underlying_symbol: symbol,
+                shortcode: `SPEEDBOT_${contractTypeCode}_${symbol}`,
+                contract_type: contractTypeCode,
                 currency,
-                underlying_symbol: selectedSymbolRef.current,
             };
+
+            // Show the open transaction immediately in the Transactions table.
+            pushContract(fallback);
+            logJournal(`🛒 Speed Bot bought ${type} on ${symbol} — stake ${stake.toFixed(2)} ${currency}`, MessageTypes.SUCCESS);
 
             const settled = await streamContractUntilSettled({
                 contractId: buy.contract_id,
                 fallback,
+                onUpdate: snapshot => pushContract(snapshot),
                 source: 'Speed Bot',
             });
 
-            return Number(settled.profit ?? 0);
+            const profit = Number(settled.profit ?? 0);
+            const won = profit > 0;
+
+            logJournal(
+                won
+                    ? `✅ Speed Bot won ${profit.toFixed(2)} ${currency} (${type} on ${symbol})`
+                    : `❌ Speed Bot lost ${Math.abs(profit).toFixed(2)} ${currency} (${type} on ${symbol})`,
+                won ? MessageTypes.SUCCESS : MessageTypes.ERROR
+            );
+
+            return profit;
         },
-        [buildTradeParameters, currency]
+        [buildTradeParameters, currency, logJournal, pushContract]
     );
 
     const stopTrading = useCallback(() => {
@@ -295,10 +387,18 @@ const SpeedBot = observer(() => {
         consecutiveLossesRef.current = 0;
         isRecoveringRef.current = false;
         shouldStopRef.current = false;
+        sessionPnlRef.current = 0;
+        setSessionPnl(0);
 
-        let currentType: TEvenOdd = tradeTypeRef.current;
+        let currentType: TEvenOdd = autoAnalyzeRef.current ? analyzeAndPickTradeType() : tradeTypeRef.current;
 
         while (!shouldStopRef.current) {
+            // When auto-analysis is enabled, re-evaluate the last-tick analysis
+            // before every trade so direction always follows the latest data.
+            if (autoAnalyzeRef.current) {
+                currentType = analyzeAndPickTradeType();
+            }
+
             setIsTradeInFlight(true);
             const tradeStake = currentStakeRef.current;
             setStatusMessage(`Trading ${currentType} with ${tradeStake.toFixed(2)} ${currency}...`);
@@ -308,6 +408,8 @@ const SpeedBot = observer(() => {
                 if (shouldStopRef.current) break;
 
                 const won = profit > 0;
+                sessionPnlRef.current = parseFloat((sessionPnlRef.current + profit).toFixed(8));
+                setSessionPnl(sessionPnlRef.current);
 
                 if (won) {
                     setStatusMessage(`✅ Won ${profit.toFixed(2)} ${currency}`);
@@ -334,17 +436,38 @@ const SpeedBot = observer(() => {
                         }
                     }
 
-                    if (alternateOnLossRef.current) {
+                    if (!autoAnalyzeRef.current && alternateOnLossRef.current) {
                         currentType = currentType === 'Even' ? 'Odd' : 'Even';
                     }
                 }
 
-                // Alternate Even/Odd on every trade regardless of outcome.
-                if (alternateEvenOddRef.current) {
+                // Alternate Even/Odd on every trade regardless of outcome (manual mode only;
+                // auto-analysis picks its own direction every iteration).
+                if (!autoAnalyzeRef.current && alternateEvenOddRef.current) {
                     currentType = currentType === 'Even' ? 'Odd' : 'Even';
                 }
 
                 setTradeType(currentType);
+
+                // Stop Loss / Take Profit: end the session once either threshold is reached.
+                const takeProfit = takeProfitRef.current;
+                const stopLoss = stopLossRef.current;
+                if (takeProfit > 0 && sessionPnlRef.current >= takeProfit) {
+                    setStatusMessage(`🎯 Take Profit reached: +${sessionPnlRef.current.toFixed(2)} ${currency}`);
+                    logJournal(
+                        `🎯 Speed Bot stopped — Take Profit of ${takeProfit.toFixed(2)} ${currency} reached (session P/L: ${sessionPnlRef.current.toFixed(2)} ${currency})`,
+                        MessageTypes.SUCCESS
+                    );
+                    break;
+                }
+                if (stopLoss > 0 && sessionPnlRef.current <= -stopLoss) {
+                    setStatusMessage(`🛑 Stop Loss reached: ${sessionPnlRef.current.toFixed(2)} ${currency}`);
+                    logJournal(
+                        `🛑 Speed Bot stopped — Stop Loss of ${stopLoss.toFixed(2)} ${currency} reached (session P/L: ${sessionPnlRef.current.toFixed(2)} ${currency})`,
+                        MessageTypes.ERROR
+                    );
+                    break;
+                }
             } catch (error) {
                 setErrorMessage(error instanceof Error ? error.message : 'Trade failed.');
                 break;
@@ -355,7 +478,7 @@ const SpeedBot = observer(() => {
 
         shouldStopRef.current = true;
         setIsTrading(false);
-    }, [currency, runSingleTrade, stakeInput, ticksInput]);
+    }, [analyzeAndPickTradeType, currency, logJournal, runSingleTrade, stakeInput, ticksInput]);
 
     const handleStartTrading = useCallback(() => {
         if (isTrading) {
@@ -397,9 +520,14 @@ const SpeedBot = observer(() => {
             return;
         }
 
+        const type = autoAnalyzeRef.current ? analyzeAndPickTradeType() : tradeType;
+
         setIsTradeInFlight(true);
         try {
-            const profit = await runSingleTrade(tradeType, stake, durationTicks);
+            const profit = await runSingleTrade(type, stake, durationTicks);
+            sessionPnlRef.current = parseFloat((sessionPnlRef.current + profit).toFixed(8));
+            setSessionPnl(sessionPnlRef.current);
+            setTradeType(type);
             setStatusMessage(
                 profit > 0 ? `✅ Won ${profit.toFixed(2)} ${currency}` : `❌ Lost ${Math.abs(profit).toFixed(2)} ${currency}`
             );
@@ -408,7 +536,7 @@ const SpeedBot = observer(() => {
         } finally {
             setIsTradeInFlight(false);
         }
-    }, [currency, isTradeInFlight, isTrading, runSingleTrade, stakeInput, ticksInput, tradeType]);
+    }, [analyzeAndPickTradeType, currency, isTradeInFlight, isTrading, runSingleTrade, stakeInput, ticksInput, tradeType]);
 
     useEffect(() => {
         if (!showSpeedBot) return undefined;
@@ -449,12 +577,29 @@ const SpeedBot = observer(() => {
                 <select
                     className='speed-bot-select speed-bot-select--type'
                     value={tradeType}
-                    disabled={isTrading}
+                    disabled={isTrading || autoAnalyze}
                     onChange={event => setTradeType(event.target.value as TEvenOdd)}
                 >
                     <option value='Even'>Even</option>
                     <option value='Odd'>Odd</option>
                 </select>
+
+                <label className='speed-bot-toggle-row'>
+                    <span>
+                        <Localize i18n_default_text='Auto Trade (Use Last Tick Analysis)' />
+                    </span>
+                    <span className={`speed-bot-switch ${autoAnalyze ? 'speed-bot-switch--on' : ''}`}>
+                        <input
+                            type='checkbox'
+                            checked={autoAnalyze}
+                            disabled={isTrading}
+                            onChange={event => setAutoAnalyze(event.target.checked)}
+                        />
+                        <span className='speed-bot-switch__knob' />
+                    </span>
+                </label>
+
+                <div className='speed-bot-divider' />
 
                 <div className='speed-bot-pattern'>
                     <div className='speed-bot-pattern__title'>
@@ -518,6 +663,34 @@ const SpeedBot = observer(() => {
                         />
                     </label>
                 </div>
+
+                <div className='speed-bot-inputs'>
+                    <label className='speed-bot-field'>
+                        <span>
+                            <Localize i18n_default_text='Take Profit' />
+                        </span>
+                        <input
+                            inputMode='decimal'
+                            value={takeProfitInput}
+                            disabled={isTrading}
+                            onChange={event => setTakeProfitInput(cleanMoneyInput(event.target.value))}
+                        />
+                    </label>
+                    <label className='speed-bot-field'>
+                        <span>
+                            <Localize i18n_default_text='Stop Loss' />
+                        </span>
+                        <input
+                            inputMode='decimal'
+                            value={stopLossInput}
+                            disabled={isTrading}
+                            onChange={event => setStopLossInput(cleanMoneyInput(event.target.value))}
+                        />
+                    </label>
+                </div>
+                <p className='speed-bot-tp-sl-hint'>
+                    <Localize i18n_default_text='Start Trading runs continuously until Take Profit or Stop Loss is reached. Trade Once always places a single trade.' />
+                </p>
 
                 <div className='speed-bot-actions'>
                     <button
@@ -604,6 +777,13 @@ const SpeedBot = observer(() => {
                 <div className='speed-bot-footer'>
                     <div>
                         <Localize i18n_default_text='Ticks Processed:' /> <strong>{ticksProcessed}</strong>
+                    </div>
+                    <div>
+                        <Localize i18n_default_text='Session P/L:' />{' '}
+                        <strong className={sessionPnl > 0 ? 'speed-bot-pnl--positive' : sessionPnl < 0 ? 'speed-bot-pnl--negative' : ''}>
+                            {sessionPnl >= 0 ? '+' : ''}
+                            {sessionPnl.toFixed(2)} {currency}
+                        </strong>
                     </div>
                     <div>
                         <Localize i18n_default_text='Last Digit:' /> <strong>{latestDigit ?? '—'}</strong>
