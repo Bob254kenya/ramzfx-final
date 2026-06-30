@@ -220,9 +220,72 @@
 
 .aviator-history__track {
     display: flex;
+    flex-direction: column;
     gap: 8px;
-    overflow-x: auto;
-    padding-bottom: 4px;
+    max-height: 260px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 4px;
+}
+
+// ==================== All volatilities (live) ====================
+
+.aviator-volatilities {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 14px 16px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+    margin-bottom: 16px;
+}
+
+.aviator-volatilities__title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 10px;
+}
+
+.aviator-volatilities__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+}
+
+.aviator-volatility-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #f7f8fa;
+    border: 1px solid transparent;
+}
+
+.aviator-volatility-card--active {
+    border-color: #c8a45d;
+    background: rgba(200, 164, 93, 0.08);
+}
+
+.aviator-volatility-card__label {
+    font-size: 11px;
+    color: #9aa1ad;
+    font-weight: 600;
+}
+
+.aviator-volatility-card__quote {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.aviator-volatility-card__quote--up {
+    color: #28c76f;
+}
+
+.aviator-volatility-card__quote--down {
+    color: #e0335c;
 }
 
 .aviator-history__empty {
