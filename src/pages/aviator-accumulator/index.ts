@@ -1,1 +1,1 @@
-aviator-accumulator/index.ts
+export { default } from './aviator-accumulator';
