@@ -17,9 +17,11 @@ import './pro-scanner.scss';
 
 type TTick = { epoch: number; quote: number };
 
-type TStrategyId = 'over_under' | 'even_odd' | 'matches_differs' | 'rise_fall' | 'digit_pattern';
+type TStrategyId = 'over_under' | 'even_odd' | 'matches_differs' | 'rise_fall' | 'pattern' | 'digit';
 
 type TContractType = 'DIGITOVER' | 'DIGITUNDER' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITMATCH' | 'DIGITDIFF' | 'CALL' | 'PUT';
+
+type TDigitOp = '==' | '!=' | '>' | '>=' | '<' | '<=';
 
 type TSignal = {
     barrier?: string;
@@ -34,14 +36,23 @@ type TMarket = { label: string; symbol: string };
 
 type TLogEntry = { at: number; kind: 'info' | 'win' | 'loss' | 'error' | 'signal'; text: string };
 
-/** Which of the two configured markets is currently taking trades. */
-type TMarketSlot = 'm1' | 'm2';
+type TMarketMode = 'fixed' | 'auto';
 
-/** Everything the trading loop needs to know about the tick that just arrived. */
-type TMarketContext = { slot: TMarketSlot; strategyId: TStrategyId; symbol: string; ticks: TTick[] };
+type TSlotId = 'm1' | 'm2';
 
-/** One row of the "scan all markets" ranking table. */
-type TScanResult = { confidence: number; label: string; signal: TSignal; symbol: string };
+type TSlotConfig = {
+    digitCompare: number;
+    digitOp: TDigitOp;
+    digitWindow: number;
+    marketMode: TMarketMode;
+    pattern: string;
+    strategyId: TStrategyId;
+    symbol: string;
+    targetBarrier: string;
+    targetContract: 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF';
+};
+
+type TScanResult = { confidence: number; lines: string[]; signal: TSignal; symbol: string };
 
 // ============================================================================
 // Constants
@@ -68,11 +79,32 @@ const STRATEGIES: { id: TStrategyId; label: string }[] = [
     { id: 'even_odd', label: 'Even & Odd' },
     { id: 'matches_differs', label: 'Matches & Differs' },
     { id: 'rise_fall', label: 'Rise & Fall' },
-    { id: 'digit_pattern', label: 'Digit Pattern' },
+    { id: 'pattern', label: 'Pattern (E/O sequence)' },
+    { id: 'digit', label: 'Digit condition' },
+];
+
+const DIGIT_OPS: { id: TDigitOp; label: string }[] = [
+    { id: '==', label: '= (equals)' },
+    { id: '!=', label: '≠ (not equal)' },
+    { id: '>', label: '> (greater than)' },
+    { id: '>=', label: '≥ (greater or equal)' },
+    { id: '<', label: '< (less than)' },
+    { id: '<=', label: '≤ (less or equal)' },
+];
+
+const TARGET_CONTRACTS: { id: TSlotConfig['targetContract']; label: string; needsBarrier: boolean }[] = [
+    { id: 'DIGITEVEN', label: 'Digit Even', needsBarrier: false },
+    { id: 'DIGITODD', label: 'Digit Odd', needsBarrier: false },
+    { id: 'DIGITOVER', label: 'Digit Over', needsBarrier: true },
+    { id: 'DIGITUNDER', label: 'Digit Under', needsBarrier: true },
+    { id: 'DIGITMATCH', label: 'Digit Matches', needsBarrier: true },
+    { id: 'DIGITDIFF', label: 'Digit Differs', needsBarrier: true },
 ];
 
 const MAX_TICKS = 1000;
-const MIN_SAMPLE_FOR_SIGNAL = 200;
+const MIN_SAMPLE_FOR_SIGNAL = 100;
+const SCAN_HISTORY_COUNT = 300;
+const SCAN_RETRY_DELAY_MS = 1200;
 const DEFAULT_STAKE = '0.5';
 const DEFAULT_STOP_LOSS = '20';
 const DEFAULT_TAKE_PROFIT = '5';
@@ -81,17 +113,29 @@ const DEFAULT_RUNS = '5';
 const MARTINGALE_STEPS = [1, 1.2, 1.5, 1.8, 2, 2.2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10];
 const MAX_LOG_ENTRIES = 120;
 
-// Scan-all-markets tuning
-const SCAN_HISTORY_COUNT = 150;
-const SCAN_MIN_SAMPLE = 60;
-const SCAN_INTERVAL_MS = 6000;
-const SCAN_TOP_N = 5;
+const DEFAULT_M1_CONFIG: TSlotConfig = {
+    digitCompare: 5,
+    digitOp: '==',
+    digitWindow: 3,
+    marketMode: 'fixed',
+    pattern: 'EOE',
+    strategyId: 'over_under',
+    symbol: 'R_10',
+    targetBarrier: '5',
+    targetContract: 'DIGITEVEN',
+};
 
-// Digit Pattern Strategy Constants
-const DIGIT_CONDITIONS = ['==', '>', '<', '>=', '<='];
-const DEFAULT_DIGIT_WINDOW = '3';
-const DEFAULT_DIGIT_COMPARE = '5';
-const DEFAULT_PATTERN = '';
+const DEFAULT_M2_CONFIG: TSlotConfig = {
+    digitCompare: 5,
+    digitOp: '==',
+    digitWindow: 3,
+    marketMode: 'fixed',
+    pattern: 'OEO',
+    strategyId: 'even_odd',
+    symbol: 'R_25',
+    targetBarrier: '5',
+    targetContract: 'DIGITODD',
+};
 
 // ============================================================================
 // Pure helpers
@@ -99,6 +143,8 @@ const DEFAULT_PATTERN = '';
 
 const cleanMoney = (value: string) => value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
 const cleanInt = (value: string) => value.replace(/[^\d]/g, '');
+const labelForSymbol = (symbol: string) => MARKETS.find(m => m.symbol === symbol)?.label ?? symbol;
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const digitsFromTicks = (ticks: TTick[], symbol: string) => ticks.map(tick => getLastDigitFromQuote(tick.quote, symbol));
 
@@ -111,123 +157,76 @@ const digitStatsFrom = (digits: number[]) => {
     return counts.map(count => Number(((count / total) * 100).toFixed(1)));
 };
 
-/** Check if a digit pattern matches (E=Even, O=Odd) */
-const checkPatternMatch = (digits: number[], pattern: string): boolean => {
-    if (pattern.length === 0 || digits.length < pattern.length) return false;
-    const recent = digits.slice(-pattern.length);
-    for (let i = 0; i < pattern.length; i++) {
-        const expected = pattern[i];
-        const actual = recent[i] % 2 === 0 ? 'E' : 'O';
-        if (expected !== actual) return false;
+const compareDigit = (digit: number, op: TDigitOp, compare: number): boolean => {
+    switch (op) {
+        case '==':
+            return digit === compare;
+        case '!=':
+            return digit !== compare;
+        case '>':
+            return digit > compare;
+        case '>=':
+            return digit >= compare;
+        case '<':
+            return digit < compare;
+        case '<=':
+            return digit <= compare;
+        default:
+            return false;
     }
-    return true;
 };
 
-/** Check if digit condition is met */
-const checkDigitCondition = (digits: number[], condition: string, compare: number, window: number): boolean => {
-    if (digits.length < window) return false;
-    const recent = digits.slice(-window);
-    return recent.every(d => {
-        switch (condition) {
-            case '>': return d > compare;
-            case '<': return d < compare;
-            case '>=': return d >= compare;
-            case '<=': return d <= compare;
-            case '==': return d === compare;
-            default: return false;
-        }
-    });
+const buildTargetSignal = (config: TSlotConfig): TSignal => {
+    const meta = TARGET_CONTRACTS.find(t => t.id === config.targetContract) ?? TARGET_CONTRACTS[0];
+    if (!meta.needsBarrier) return { contractType: meta.id, label: meta.label };
+    return { barrier: config.targetBarrier, contractType: meta.id, label: `${meta.label} ${config.targetBarrier}` };
 };
 
-/** Builds a trade signal for the selected strategy from the current tick window */
-const buildSignal = (
-    strategyId: TStrategyId, 
-    ticks: TTick[], 
-    symbol: string,
-    digitPattern?: string,
-    digitCondition?: string,
-    digitCompare?: string,
-    digitWindow?: string
-): { confidence: number; lines: string[]; signal: TSignal } => {
+/** Evaluates a slot's configured strategy against a tick window. Returns null when there is no trade signal yet. */
+const evaluateStrategy = (config: TSlotConfig, ticks: TTick[], symbol: string): { confidence: number; lines: string[]; signal: TSignal } | null => {
     const digits = digitsFromTicks(ticks, symbol);
-    const sample = Math.max(digits.length, 1);
-    const lines: string[] = [];
+    const sample = digits.length;
 
-    // Digit Pattern Strategy
-    if (strategyId === 'digit_pattern') {
-        const pattern = digitPattern?.toUpperCase().replace(/[^EO]/g, '') || '';
-        const condition = digitCondition || '==';
-        const compare = parseInt(digitCompare || '5');
-        const window = parseInt(digitWindow || '3');
-        
-        let patternMatched = false;
-        let conditionMatched = false;
-        
-        if (pattern.length >= 2) {
-            patternMatched = checkPatternMatch(digits, pattern);
-        }
-        
-        if (digits.length >= window) {
-            conditionMatched = checkDigitCondition(digits, condition, compare, window);
-        }
-        
-        // Determine signal based on pattern and condition
-        if (patternMatched && conditionMatched) {
-            lines.push(`✅ Pattern "${pattern}" matched in last ${pattern.length} ticks.`);
-            lines.push(`✅ Digit condition ${condition} ${compare} met in last ${window} ticks.`);
-            // Default to EVEN when both match
-            return {
-                confidence: 85,
-                lines,
-                signal: { contractType: 'DIGITEVEN', label: 'Even' },
-            };
-        } else if (patternMatched) {
-            lines.push(`✅ Pattern "${pattern}" matched in last ${pattern.length} ticks.`);
-            lines.push(`⏳ Waiting for digit condition ${condition} ${compare} in last ${window} ticks.`);
-            return {
-                confidence: 70,
-                lines,
-                signal: { contractType: 'DIGITEVEN', label: 'Even' },
-            };
-        } else if (conditionMatched) {
-            lines.push(`✅ Digit condition ${condition} ${compare} met in last ${window} ticks.`);
-            lines.push(`⏳ Waiting for pattern "${pattern}" in last ${pattern.length} ticks.`);
-            return {
-                confidence: 70,
-                lines,
-                signal: { contractType: 'DIGITEVEN', label: 'Even' },
-            };
-        }
-        
-        // Fallback: use most common digit
-        const stats = digitStatsFrom(digits);
-        let mostCommon = 0;
-        stats.forEach((pct, digit) => {
-            if (pct > stats[mostCommon]) mostCommon = digit;
-        });
-        lines.push(`📊 Most common digit: ${mostCommon} (${stats[mostCommon]}%)`);
-        lines.push(`📊 Pattern "${pattern}" not matched, condition ${condition} ${compare} not met.`);
+    if (config.strategyId === 'pattern') {
+        const clean = config.pattern.toUpperCase().replace(/[^EO]/g, '');
+        if (clean.length < 2 || sample < clean.length) return null;
+        const recent = digits.slice(-clean.length);
+        const matched = recent.every((digit, index) => (digit % 2 === 0 ? 'E' : 'O') === clean[index]);
+        if (!matched) return null;
         return {
-            confidence: Math.max(0, stats[mostCommon] - 10),
-            lines,
-            signal: { barrier: String(mostCommon), contractType: 'DIGITMATCH', label: `Match ${mostCommon}` },
+            confidence: 1,
+            lines: [`Pattern ${clean} matched on the last ${clean.length} digits.`],
+            signal: buildTargetSignal(config),
         };
     }
 
-    if (strategyId === 'over_under') {
-        let lowCount = 0;
-        let highCount = 0;
+    if (config.strategyId === 'digit') {
+        const window = Math.max(1, config.digitWindow);
+        if (sample < window) return null;
+        const recent = digits.slice(-window);
+        const matchCount = recent.filter(digit => compareDigit(digit, config.digitOp, config.digitCompare)).length;
+        if (matchCount !== window) return null;
+        return {
+            confidence: matchCount / window,
+            lines: [`Last ${window} digits all satisfy "digit ${config.digitOp} ${config.digitCompare}".`],
+            signal: buildTargetSignal(config),
+        };
+    }
+
+    if (sample < MIN_SAMPLE_FOR_SIGNAL) return null;
+
+    if (config.strategyId === 'over_under') {
+        let lowCount = 0; // 0-4
+        let highCount = 0; // 5-9
         digits.forEach(d => (d <= 4 ? lowCount++ : highCount++));
         const lowPct = ((lowCount / sample) * 100).toFixed(1);
         const highPct = ((highCount / sample) * 100).toFixed(1);
-        const confidence = Math.abs(lowCount - highCount) / sample * 100;
+        const confidence = Math.abs(lowCount - highCount) / sample;
 
         if (lowCount <= highCount) {
-            lines.push(`Digits 0-4 are less frequent (${lowPct}%) — trading OVER.`);
-            lines.push('Primary: Over 1 · Recovery: Over 3');
             return {
                 confidence,
-                lines,
+                lines: [`Digits 0-4 are less frequent (${lowPct}%) — trading OVER.`, 'Primary: Over 1 · Recovery: Over 3'],
                 signal: {
                     barrier: '1',
                     contractType: 'DIGITOVER',
@@ -238,11 +237,9 @@ const buildSignal = (
                 },
             };
         }
-        lines.push(`Digits 5-9 are less frequent (${highPct}%) — trading UNDER.`);
-        lines.push('Primary: Under 8 · Recovery: Under 6');
         return {
             confidence,
-            lines,
+            lines: [`Digits 5-9 are less frequent (${highPct}%) — trading UNDER.`, 'Primary: Under 8 · Recovery: Under 6'],
             signal: {
                 barrier: '8',
                 contractType: 'DIGITUNDER',
@@ -254,21 +251,25 @@ const buildSignal = (
         };
     }
 
-    if (strategyId === 'even_odd') {
+    if (config.strategyId === 'even_odd') {
         const evenCount = digits.filter(d => d % 2 === 0).length;
         const oddCount = sample - evenCount;
-        const evenPct = ((evenCount / sample) * 100).toFixed(1);
-        const oddPct = ((oddCount / sample) * 100).toFixed(1);
-        const confidence = Math.abs(evenCount - oddCount) / sample * 100;
+        const confidence = Math.abs(evenCount - oddCount) / sample;
         if (evenCount >= oddCount) {
-            lines.push(`EVEN dominates the last ${sample} ticks (${evenPct}%).`);
-            return { confidence, lines, signal: { contractType: 'DIGITEVEN', label: 'Even' } };
+            return {
+                confidence,
+                lines: [`EVEN dominates the last ${sample} ticks (${((evenCount / sample) * 100).toFixed(1)}%).`],
+                signal: { contractType: 'DIGITEVEN', label: 'Even' },
+            };
         }
-        lines.push(`ODD dominates the last ${sample} ticks (${oddPct}%).`);
-        return { confidence, lines, signal: { contractType: 'DIGITODD', label: 'Odd' } };
+        return {
+            confidence,
+            lines: [`ODD dominates the last ${sample} ticks (${((oddCount / sample) * 100).toFixed(1)}%).`],
+            signal: { contractType: 'DIGITODD', label: 'Odd' },
+        };
     }
 
-    if (strategyId === 'matches_differs') {
+    if (config.strategyId === 'matches_differs') {
         const stats = digitStatsFrom(digits);
         let mostCommon = 0;
         let leastCommon = 0;
@@ -276,10 +277,12 @@ const buildSignal = (
             if (pct > stats[mostCommon]) mostCommon = digit;
             if (pct < stats[leastCommon]) leastCommon = digit;
         });
-        const confidence = Math.max(0, stats[mostCommon] - stats[leastCommon]);
-        lines.push(`Digit ${mostCommon} is the most common (${stats[mostCommon]}%).`);
-        lines.push(`Digit ${leastCommon} is the least common (${stats[leastCommon]}%) — trading DIFFERS.`);
-        return { confidence, lines, signal: { barrier: String(leastCommon), contractType: 'DIGITDIFF', label: `Differs ${leastCommon}` } };
+        const confidence = (stats[mostCommon] - stats[leastCommon]) / 100;
+        return {
+            confidence,
+            lines: [`Digit ${mostCommon} is the most common (${stats[mostCommon]}%).`, `Digit ${leastCommon} is the least common (${stats[leastCommon]}%) — trading DIFFERS.`],
+            signal: { barrier: String(leastCommon), contractType: 'DIGITDIFF', label: `Differs ${leastCommon}` },
+        };
     }
 
     // rise_fall
@@ -289,14 +292,12 @@ const buildSignal = (
         if (ticks[i].quote > ticks[i - 1].quote) ups += 1;
         else if (ticks[i].quote < ticks[i - 1].quote) downs += 1;
     }
-    const moveSample = Math.max(ups + downs, 1);
-    const confidence = (Math.abs(ups - downs) / moveSample) * 100;
+    const total = Math.max(ups + downs, 1);
+    const confidence = Math.abs(ups - downs) / total;
     const rising = ups >= downs;
-    lines.push(`Price moved up ${ups} times and down ${downs} times in this window.`);
-    lines.push(rising ? 'Momentum favors RISE.' : 'Momentum favors FALL.');
     return {
         confidence,
-        lines,
+        lines: [`Price moved up ${ups} times and down ${downs} times in this window.`, rising ? 'Momentum favors RISE.' : 'Momentum favors FALL.'],
         signal: rising ? { contractType: 'CALL', label: 'Rise' } : { contractType: 'PUT', label: 'Fall' },
     };
 };
@@ -307,86 +308,41 @@ const getTickFromWsPayload = (data: any): TTick | null => {
     return { epoch: Number(data?.tick?.epoch) || Math.floor(Date.now() / 1000), quote };
 };
 
-// ============================================================================
-// Shared market tick-stream loader
-// ============================================================================
-
-type TMarketStreamArgs = {
-    onLiveTick: (tick: TTick) => void;
-    pushLog: (kind: TLogEntry['kind'], text: string) => void;
-    requestVersionRef: { current: number };
-    setConnected: (connected: boolean) => void;
-    setTicks: (ticks: TTick[]) => void;
-    subscriptionRef: { current: { unsubscribe?: () => void } | null };
-    symbol: string;
-    ticksRef: { current: TTick[] };
+/** One-shot tick history fetch, used by the all-markets scanner (and by the fixed-market evaluator). */
+const fetchHistorySnapshot = async (symbol: string): Promise<TTick[]> => {
+    const history = await api_base.api.send({
+        adjust_start_time: 1,
+        count: SCAN_HISTORY_COUNT,
+        end: 'latest',
+        start: 1,
+        style: 'ticks',
+        ticks_history: symbol,
+    });
+    const prices: Array<number | string> = Array.isArray(history?.history?.prices) ? history.history.prices : [];
+    const times: Array<number | string> = Array.isArray(history?.history?.times) ? history.history.times : [];
+    return prices
+        .map((price, index) => ({ epoch: Number(times[index]) || Math.floor(Date.now() / 1000), quote: Number(price) }))
+        .filter((tick): tick is TTick => Number.isFinite(tick.quote));
 };
 
-const loadAndSubscribeMarket = async ({
-    onLiveTick,
-    pushLog,
-    requestVersionRef,
-    setConnected,
-    setTicks,
-    subscriptionRef,
-    symbol,
-    ticksRef,
-}: TMarketStreamArgs) => {
-    try {
-        subscriptionRef.current?.unsubscribe?.();
-    } catch {
-        // stream may already be closed
-    }
-    subscriptionRef.current = null;
-    if (!api_base.api) return;
-
-    const requestVersion = requestVersionRef.current + 1;
-    requestVersionRef.current = requestVersion;
-    setConnected(false);
-    setTicks([]);
-    ticksRef.current = [];
-
-    try {
-        const history = await api_base.api.send({
-            adjust_start_time: 1,
-            count: MAX_TICKS,
-            end: 'latest',
-            start: 1,
-            style: 'ticks',
-            ticks_history: symbol,
-        });
-        if (requestVersionRef.current !== requestVersion) return;
-
-        const prices: Array<number | string> = Array.isArray(history?.history?.prices) ? history.history.prices : [];
-        const times: Array<number | string> = Array.isArray(history?.history?.times) ? history.history.times : [];
-        const historyTicks = prices
-            .map((price, index) => ({ epoch: Number(times[index]) || Math.floor(Date.now() / 1000), quote: Number(price) }))
-            .filter((tick): tick is TTick => Number.isFinite(tick.quote))
-            .slice(-MAX_TICKS);
-
-        ticksRef.current = historyTicks;
-        setTicks(historyTicks);
-        setConnected(true);
-
-        const observable = (api_base.api as any).subscribe({ ticks: symbol });
-        subscriptionRef.current = safeSubscribe(
-            observable,
-            (data: any) => {
-                if (requestVersionRef.current !== requestVersion) return;
-                const tick = getTickFromWsPayload(data);
-                if (tick) onLiveTick(tick);
-            },
-            error => {
-                if (isExpectedStreamInterruption(error)) return;
-                setConnected(false);
-                pushLog('error', 'Tick stream interrupted — reconnecting…');
+/** Scans either the slot's fixed market, or every market when marketMode is 'auto', and returns the strongest signal. */
+const evaluateSlot = async (config: TSlotConfig): Promise<TScanResult | null> => {
+    const symbols = config.marketMode === 'auto' ? MARKETS.map(m => m.symbol) : [config.symbol];
+    const results = await Promise.all(
+        symbols.map(async symbol => {
+            try {
+                const ticks = await fetchHistorySnapshot(symbol);
+                const evaluated = evaluateStrategy(config, ticks, symbol);
+                return evaluated ? { symbol, ...evaluated } : null;
+            } catch {
+                return null;
             }
-        );
-    } catch (error) {
-        setConnected(false);
-        const message = error instanceof Error ? error.message : 'Unable to load market data.';
-        pushLog('error', message);
-    }
+        })
+    );
+    const valid = results.filter((r): r is TScanResult => !!r);
+    if (!valid.length) return null;
+    valid.sort((a, b) => b.confidence - a.confidence);
+    return valid[0];
 };
 
 // ============================================================================
@@ -417,6 +373,149 @@ const TpSlNotification: React.FC<{
 );
 
 // ============================================================================
+// Slot configuration panel (shared markup for M1 and M2)
+// ============================================================================
+
+const SlotFields: React.FC<{
+    config: TSlotConfig;
+    disabled: boolean;
+    onChange: (patch: Partial<TSlotConfig>) => void;
+}> = ({ config, disabled, onChange }) => (
+    <>
+        <label className='scanner2-field'>
+            <span>Market mode</span>
+            <select value={config.marketMode} disabled={disabled} onChange={e => onChange({ marketMode: e.target.value as TMarketMode })}>
+                <option value='fixed'>Fixed market</option>
+                <option value='auto'>Auto — scan all markets</option>
+            </select>
+        </label>
+
+        {config.marketMode === 'fixed' && (
+            <label className='scanner2-field'>
+                <span>Market</span>
+                <select value={config.symbol} disabled={disabled} onChange={e => onChange({ symbol: e.target.value })}>
+                    {MARKETS.map(market => (
+                        <option key={market.symbol} value={market.symbol}>
+                            {market.label}
+                        </option>
+                    ))}
+                </select>
+            </label>
+        )}
+
+        <label className='scanner2-field'>
+            <span>Strategy</span>
+            <select value={config.strategyId} disabled={disabled} onChange={e => onChange({ strategyId: e.target.value as TStrategyId })}>
+                {STRATEGIES.map(strat => (
+                    <option key={strat.id} value={strat.id}>
+                        {strat.label}
+                    </option>
+                ))}
+            </select>
+        </label>
+
+        {config.strategyId === 'pattern' && (
+            <>
+                <label className='scanner2-field'>
+                    <span>Pattern (E = even digit, O = odd digit)</span>
+                    <input
+                        value={config.pattern}
+                        disabled={disabled}
+                        maxLength={8}
+                        placeholder='e.g. EOE'
+                        onChange={e => onChange({ pattern: e.target.value.toUpperCase().replace(/[^EO]/g, '') })}
+                    />
+                </label>
+                <div className='scanner2-field-row'>
+                    <label className='scanner2-field'>
+                        <span>Trade when matched</span>
+                        <select value={config.targetContract} disabled={disabled} onChange={e => onChange({ targetContract: e.target.value as TSlotConfig['targetContract'] })}>
+                            {TARGET_CONTRACTS.map(t => (
+                                <option key={t.id} value={t.id}>
+                                    {t.label}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    {TARGET_CONTRACTS.find(t => t.id === config.targetContract)?.needsBarrier && (
+                        <label className='scanner2-field'>
+                            <span>Barrier</span>
+                            <select value={config.targetBarrier} disabled={disabled} onChange={e => onChange({ targetBarrier: e.target.value })}>
+                                {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
+                                    <option key={d} value={String(d)}>
+                                        {d}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                    )}
+                </div>
+            </>
+        )}
+
+        {config.strategyId === 'digit' && (
+            <>
+                <div className='scanner2-field-row'>
+                    <label className='scanner2-field'>
+                        <span>Condition</span>
+                        <select value={config.digitOp} disabled={disabled} onChange={e => onChange({ digitOp: e.target.value as TDigitOp })}>
+                            {DIGIT_OPS.map(op => (
+                                <option key={op.id} value={op.id}>
+                                    {op.label}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label className='scanner2-field'>
+                        <span>Compare digit</span>
+                        <select value={config.digitCompare} disabled={disabled} onChange={e => onChange({ digitCompare: Number(e.target.value) })}>
+                            {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
+                                <option key={d} value={d}>
+                                    {d}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                </div>
+                <label className='scanner2-field'>
+                    <span>Confirm over last N ticks</span>
+                    <input
+                        inputMode='numeric'
+                        disabled={disabled}
+                        value={String(config.digitWindow)}
+                        onChange={e => onChange({ digitWindow: Math.max(1, Number(cleanInt(e.target.value)) || 1) })}
+                    />
+                </label>
+                <div className='scanner2-field-row'>
+                    <label className='scanner2-field'>
+                        <span>Trade when matched</span>
+                        <select value={config.targetContract} disabled={disabled} onChange={e => onChange({ targetContract: e.target.value as TSlotConfig['targetContract'] })}>
+                            {TARGET_CONTRACTS.map(t => (
+                                <option key={t.id} value={t.id}>
+                                    {t.label}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    {TARGET_CONTRACTS.find(t => t.id === config.targetContract)?.needsBarrier && (
+                        <label className='scanner2-field'>
+                            <span>Barrier</span>
+                            <select value={config.targetBarrier} disabled={disabled} onChange={e => onChange({ targetBarrier: e.target.value })}>
+                                {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
+                                    <option key={d} value={String(d)}>
+                                        {d}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                    )}
+                </div>
+            </>
+        )}
+    </>
+);
+
+// ============================================================================
 // Component
 // ============================================================================
 
@@ -427,222 +526,76 @@ const ProScanner = observer(() => {
     const showScanner = active_tab === DBOT_TABS.PRO_SCANNER;
     const currency = client.currency || 'USD';
 
-    // Config — Market 1 (primary)
-    const [symbol, setSymbol] = useState('R_10');
-    const [strategyId, setStrategyId] = useState<TStrategyId>('over_under');
+    // Config
+    const [m1, setM1State] = useState<TSlotConfig>(DEFAULT_M1_CONFIG);
+    const [m2, setM2State] = useState<TSlotConfig>(DEFAULT_M2_CONFIG);
+    const [m2Enabled, setM2Enabled] = useState(true);
     const [stakeInput, setStakeInput] = useState(DEFAULT_STAKE);
     const [stopLossInput, setStopLossInput] = useState(DEFAULT_STOP_LOSS);
     const [takeProfitInput, setTakeProfitInput] = useState(DEFAULT_TAKE_PROFIT);
     const [martingale, setMartingale] = useState(DEFAULT_MARTINGALE);
     const [runsInput, setRunsInput] = useState(DEFAULT_RUNS);
 
-    // Digit Pattern Strategy states for M1
-    const [m1Pattern, setM1Pattern] = useState(DEFAULT_PATTERN);
-    const [m1DigitCondition, setM1DigitCondition] = useState('==');
-    const [m1DigitCompare, setM1DigitCompare] = useState(DEFAULT_DIGIT_COMPARE);
-    const [m1DigitWindow, setM1DigitWindow] = useState(DEFAULT_DIGIT_WINDOW);
-    const [m1StrategyMode, setM1StrategyMode] = useState<'pattern' | 'digit' | 'both'>('pattern');
+    const setM1 = useCallback((patch: Partial<TSlotConfig>) => setM1State(prev => ({ ...prev, ...patch })), []);
+    const setM2 = useCallback((patch: Partial<TSlotConfig>) => setM2State(prev => ({ ...prev, ...patch })), []);
 
-    // Config — Market 2 (dual-market recovery)
-    const [m2Enabled, setM2Enabled] = useState(false);
-    const [symbol2, setSymbol2] = useState('R_25');
-    const [strategyId2, setStrategyId2] = useState<TStrategyId>('even_odd');
-
-    // Digit Pattern Strategy states for M2
-    const [m2Pattern, setM2Pattern] = useState(DEFAULT_PATTERN);
-    const [m2DigitCondition, setM2DigitCondition] = useState('==');
-    const [m2DigitCompare, setM2DigitCompare] = useState(DEFAULT_DIGIT_COMPARE);
-    const [m2DigitWindow, setM2DigitWindow] = useState(DEFAULT_DIGIT_WINDOW);
-    const [m2StrategyMode, setM2StrategyMode] = useState<'pattern' | 'digit' | 'both'>('pattern');
-
-    // Config — scan-all-markets
-    const [scanMode, setScanMode] = useState<'manual' | 'scan_all'>('manual');
-    const [scanRanking, setScanRanking] = useState<TScanResult[]>([]);
-    const [isScanning, setIsScanning] = useState(false);
-
-    // Live data — Market 1
+    // Live data (preview panel only — the trading loop performs its own history scans)
     const [ticks, setTicks] = useState<TTick[]>([]);
     const [isConnected, setIsConnected] = useState(false);
-
-    // Live data — Market 2
-    const [ticks2, setTicks2] = useState<TTick[]>([]);
-    const [isConnected2, setIsConnected2] = useState(false);
-
-    // Session state
     const [isRunning, setIsRunning] = useState(false);
+    const [isScanning, setIsScanning] = useState(false);
     const [log, setLog] = useState<TLogEntry[]>([]);
     const [sessionPnl, setSessionPnl] = useState(0);
     const [completedRuns, setCompletedRuns] = useState(0);
     const [consecutiveLosses, setConsecutiveLosses] = useState(0);
     const [currentStakeDisplay, setCurrentStakeDisplay] = useState(0);
     const [isRecoveryMode, setIsRecoveryMode] = useState(false);
-    const [activeMarketSlot, setActiveMarketSlot] = useState<TMarketSlot>('m1');
+    const [activeSlotDisplay, setActiveSlotDisplay] = useState<TSlotId>('m1');
+    const [focusSymbol, setFocusSymbol] = useState<string | null>(null);
     const [notification, setNotification] = useState<{ isTakeProfit: boolean; runs: number; totalPnl: number } | null>(null);
 
     // Refs mirroring the state used by the async trading loop
     const ticksRef = useRef<TTick[]>([]);
-    const ticks2Ref = useRef<TTick[]>([]);
-    const symbolRef = useRef(symbol);
-    const symbol2Ref = useRef(symbol2);
-    const strategyRef = useRef(strategyId);
-    const strategy2Ref = useRef(strategyId2);
-    const m2EnabledRef = useRef(false);
-    const activeMarketSlotRef = useRef<TMarketSlot>('m1');
     const shouldStopRef = useRef(true);
-    const tradeActiveRef = useRef(false);
     const tradeInFlightRef = useRef(false);
     const subscriptionRef = useRef<{ unsubscribe?: () => void } | null>(null);
-    const subscription2Ref = useRef<{ unsubscribe?: () => void } | null>(null);
     const requestVersionRef = useRef(0);
-    const requestVersion2Ref = useRef(0);
 
-    // Digit Pattern refs for M1
-    const m1PatternRef = useRef(m1Pattern);
-    const m1DigitConditionRef = useRef(m1DigitCondition);
-    const m1DigitCompareRef = useRef(m1DigitCompare);
-    const m1DigitWindowRef = useRef(m1DigitWindow);
-    const m1StrategyModeRef = useRef(m1StrategyMode);
-
-    // Digit Pattern refs for M2
-    const m2PatternRef = useRef(m2Pattern);
-    const m2DigitConditionRef = useRef(m2DigitCondition);
-    const m2DigitCompareRef = useRef(m2DigitCompare);
-    const m2DigitWindowRef = useRef(m2DigitWindow);
-    const m2StrategyModeRef = useRef(m2StrategyMode);
-
+    const m1ConfigRef = useRef<TSlotConfig>(DEFAULT_M1_CONFIG);
+    const m2ConfigRef = useRef<TSlotConfig>(DEFAULT_M2_CONFIG);
+    const m2EnabledRef = useRef(true);
+    const activeSlotRef = useRef<TSlotId>('m1');
     const baseStakeRef = useRef(0);
     const currentStakeRef = useRef(0);
     const martingaleRef = useRef(DEFAULT_MARTINGALE);
     const consecutiveLossesRef = useRef(0);
-    const consecutiveRecoveryLossesRef = useRef(0);
-    const isRecoveryRef = useRef(false);
-    const primarySignalRef = useRef<TSignal | null>(null);
-    const recoverySignalRef = useRef<TSignal | null>(null);
+    const recoveryLossesRef = useRef(0);
     const stopLossRef = useRef(0);
     const takeProfitRef = useRef(0);
     const runsToCheckRef = useRef(5);
     const completedRunsRef = useRef(0);
     const sessionPnlRef = useRef(0);
-    const handleTradeTickRef = useRef<(context: TMarketContext) => void>(() => undefined);
-    const scanRequestRef = useRef(0);
 
-    const selectedMarket = useMemo(() => MARKETS.find(m => m.symbol === symbol) ?? MARKETS[0], [symbol]);
-    const selectedMarket2 = useMemo(() => MARKETS.find(m => m.symbol === symbol2) ?? MARKETS[1], [symbol2]);
+    // The market shown in the middle "live view" panel: the slot's fixed market while idle,
+    // or whichever market the trading loop most recently picked while running.
+    const displaySymbol = isRunning ? focusSymbol ?? (m1.marketMode === 'fixed' ? m1.symbol : MARKETS[0].symbol) : m1.marketMode === 'fixed' ? m1.symbol : MARKETS[0].symbol;
 
-    const latestTick = ticks[ticks.length - 1];
-    const latestDigit = latestTick ? getLastDigitFromQuote(latestTick.quote, symbol) : null;
-    const digits = useMemo(() => digitsFromTicks(ticks, symbol), [ticks, symbol]);
+    const digits = useMemo(() => digitsFromTicks(ticks, displaySymbol), [ticks, displaySymbol]);
     const digitStats = useMemo(() => digitStatsFrom(digits), [digits]);
+    const latestTick = ticks[ticks.length - 1];
+    const latestDigit = latestTick ? getLastDigitFromQuote(latestTick.quote, displaySymbol) : null;
     const hasEnoughSamples = digits.length >= MIN_SAMPLE_FOR_SIGNAL;
-
-    // Clean patterns
-    const cleanM1Pattern = m1Pattern.toUpperCase().replace(/[^EO]/g, '');
-    const cleanM2Pattern = m2Pattern.toUpperCase().replace(/[^EO]/g, '');
-
-    // Build preview with digit pattern params for M1
-    const preview = useMemo(() => {
-        if (!hasEnoughSamples) return null;
-        const isDigitPattern = strategyId === 'digit_pattern';
-        return buildSignal(
-            strategyId, 
-            ticks, 
-            symbol,
-            isDigitPattern ? cleanM1Pattern : undefined,
-            isDigitPattern ? m1DigitCondition : undefined,
-            isDigitPattern ? m1DigitCompare : undefined,
-            isDigitPattern ? m1DigitWindow : undefined
-        );
-    }, [hasEnoughSamples, strategyId, ticks, symbol, cleanM1Pattern, m1DigitCondition, m1DigitCompare, m1DigitWindow]);
-
-    const latestTick2 = ticks2[ticks2.length - 1];
-    const latestDigit2 = latestTick2 ? getLastDigitFromQuote(latestTick2.quote, symbol2) : null;
-    const digits2 = useMemo(() => digitsFromTicks(ticks2, symbol2), [ticks2, symbol2]);
-    const hasEnoughSamples2 = digits2.length >= MIN_SAMPLE_FOR_SIGNAL;
-
-    // Build preview for M2
-    const preview2 = useMemo(() => {
-        if (!m2Enabled || !hasEnoughSamples2) return null;
-        const isDigitPattern = strategyId2 === 'digit_pattern';
-        return buildSignal(
-            strategyId2, 
-            ticks2, 
-            symbol2,
-            isDigitPattern ? cleanM2Pattern : undefined,
-            isDigitPattern ? m2DigitCondition : undefined,
-            isDigitPattern ? m2DigitCompare : undefined,
-            isDigitPattern ? m2DigitWindow : undefined
-        );
-    }, [m2Enabled, hasEnoughSamples2, strategyId2, ticks2, symbol2, cleanM2Pattern, m2DigitCondition, m2DigitCompare, m2DigitWindow]);
-
+    const preview = useMemo(
+        () => (!isRunning && m1.marketMode === 'fixed' && hasEnoughSamples ? evaluateStrategy(m1, ticks, displaySymbol) : null),
+        [displaySymbol, hasEnoughSamples, isRunning, m1, ticks]
+    );
     const isCoveredByMobileRunPanel = !isDesktop && run_panel.is_drawer_open;
 
     const pushLog = useCallback((kind: TLogEntry['kind'], text: string) => {
         setLog(previous => [...previous.slice(-(MAX_LOG_ENTRIES - 1)), { at: Date.now(), kind, text }]);
     }, []);
 
-    // Keep refs in sync with state
-    useEffect(() => {
-        ticksRef.current = ticks;
-    }, [ticks]);
-    useEffect(() => {
-        ticks2Ref.current = ticks2;
-    }, [ticks2]);
-    useEffect(() => {
-        symbolRef.current = symbol;
-    }, [symbol]);
-    useEffect(() => {
-        symbol2Ref.current = symbol2;
-    }, [symbol2]);
-    useEffect(() => {
-        strategyRef.current = strategyId;
-    }, [strategyId]);
-    useEffect(() => {
-        strategy2Ref.current = strategyId2;
-    }, [strategyId2]);
-    useEffect(() => {
-        martingaleRef.current = martingale;
-    }, [martingale]);
-    useEffect(() => {
-        m2EnabledRef.current = m2Enabled;
-    }, [m2Enabled]);
-    useEffect(() => {
-        activeMarketSlotRef.current = activeMarketSlot;
-    }, [activeMarketSlot]);
-
-    // Digit Pattern refs sync
-    useEffect(() => {
-        m1PatternRef.current = m1Pattern;
-    }, [m1Pattern]);
-    useEffect(() => {
-        m1DigitConditionRef.current = m1DigitCondition;
-    }, [m1DigitCondition]);
-    useEffect(() => {
-        m1DigitCompareRef.current = m1DigitCompare;
-    }, [m1DigitCompare]);
-    useEffect(() => {
-        m1DigitWindowRef.current = m1DigitWindow;
-    }, [m1DigitWindow]);
-    useEffect(() => {
-        m1StrategyModeRef.current = m1StrategyMode;
-    }, [m1StrategyMode]);
-
-    useEffect(() => {
-        m2PatternRef.current = m2Pattern;
-    }, [m2Pattern]);
-    useEffect(() => {
-        m2DigitConditionRef.current = m2DigitCondition;
-    }, [m2DigitCondition]);
-    useEffect(() => {
-        m2DigitCompareRef.current = m2DigitCompare;
-    }, [m2DigitCompare]);
-    useEffect(() => {
-        m2DigitWindowRef.current = m2DigitWindow;
-    }, [m2DigitWindow]);
-    useEffect(() => {
-        m2StrategyModeRef.current = m2StrategyMode;
-    }, [m2StrategyMode]);
-
-    // --- Ticks stream (M1) ---------------------------------------------------
+    // --- Preview ticks stream (idle / display only) --------------------------
 
     const unsubscribe = useCallback(() => {
         try {
@@ -657,174 +610,83 @@ const ProScanner = observer(() => {
         const next = [...ticksRef.current, tick].slice(-MAX_TICKS);
         ticksRef.current = next;
         setTicks(next);
-        if (activeMarketSlotRef.current === 'm1') {
-            handleTradeTickRef.current({ slot: 'm1', strategyId: strategyRef.current, symbol: symbolRef.current, ticks: next });
-        }
     }, []);
 
-    const loadMarketData = useCallback(() => {
-        if (!showScanner) return;
-        void loadAndSubscribeMarket({
-            onLiveTick: applyLiveTick,
-            pushLog,
-            requestVersionRef,
-            setConnected: setIsConnected,
-            setTicks,
-            subscriptionRef,
-            symbol,
-            ticksRef,
-        });
-    }, [applyLiveTick, pushLog, showScanner, symbol]);
+    const loadMarketData = useCallback(async () => {
+        unsubscribe();
+        if (!showScanner || !api_base.api) return;
+
+        const requestVersion = requestVersionRef.current + 1;
+        requestVersionRef.current = requestVersion;
+        setIsConnected(false);
+        setTicks([]);
+        ticksRef.current = [];
+
+        try {
+            const history = await api_base.api.send({
+                adjust_start_time: 1,
+                count: MAX_TICKS,
+                end: 'latest',
+                start: 1,
+                style: 'ticks',
+                ticks_history: displaySymbol,
+            });
+            if (requestVersionRef.current !== requestVersion) return;
+
+            const prices: Array<number | string> = Array.isArray(history?.history?.prices) ? history.history.prices : [];
+            const times: Array<number | string> = Array.isArray(history?.history?.times) ? history.history.times : [];
+            const historyTicks = prices
+                .map((price, index) => ({ epoch: Number(times[index]) || Math.floor(Date.now() / 1000), quote: Number(price) }))
+                .filter((tick): tick is TTick => Number.isFinite(tick.quote))
+                .slice(-MAX_TICKS);
+
+            ticksRef.current = historyTicks;
+            setTicks(historyTicks);
+            setIsConnected(true);
+
+            const observable = (api_base.api as any).subscribe({ ticks: displaySymbol });
+            subscriptionRef.current = safeSubscribe(
+                observable,
+                (data: any) => {
+                    if (requestVersionRef.current !== requestVersion) return;
+                    const tick = getTickFromWsPayload(data);
+                    if (tick) applyLiveTick(tick);
+                },
+                error => {
+                    if (isExpectedStreamInterruption(error)) return;
+                    setIsConnected(false);
+                    pushLog('error', 'Tick stream interrupted — reconnecting…');
+                }
+            );
+        } catch (error) {
+            setIsConnected(false);
+            const message = error instanceof Error ? error.message : 'Unable to load market data.';
+            pushLog('error', message);
+        }
+    }, [applyLiveTick, displaySymbol, pushLog, showScanner, unsubscribe]);
 
     useEffect(() => {
-        loadMarketData();
+        void loadMarketData();
         return () => {
             requestVersionRef.current += 1;
             unsubscribe();
         };
     }, [loadMarketData, unsubscribe]);
 
-    // --- Ticks stream (M2) ---------------------------------------------------
-
-    const unsubscribe2 = useCallback(() => {
-        try {
-            subscription2Ref.current?.unsubscribe?.();
-        } catch {
-            // stream may already be closed
-        }
-        subscription2Ref.current = null;
-    }, []);
-
-    const applyLiveTick2 = useCallback((tick: TTick) => {
-        const next = [...ticks2Ref.current, tick].slice(-MAX_TICKS);
-        ticks2Ref.current = next;
-        setTicks2(next);
-        if (activeMarketSlotRef.current === 'm2') {
-            handleTradeTickRef.current({ slot: 'm2', strategyId: strategy2Ref.current, symbol: symbol2Ref.current, ticks: next });
-        }
-    }, []);
-
-    const loadMarket2Data = useCallback(() => {
-        if (!showScanner || !m2Enabled) {
-            requestVersion2Ref.current += 1;
-            unsubscribe2();
-            ticks2Ref.current = [];
-            setTicks2([]);
-            setIsConnected2(false);
-            return;
-        }
-        void loadAndSubscribeMarket({
-            onLiveTick: applyLiveTick2,
-            pushLog,
-            requestVersionRef: requestVersion2Ref,
-            setConnected: setIsConnected2,
-            setTicks: setTicks2,
-            subscriptionRef: subscription2Ref,
-            symbol: symbol2,
-            ticksRef: ticks2Ref,
-        });
-    }, [applyLiveTick2, m2Enabled, pushLog, showScanner, symbol2, unsubscribe2]);
-
-    useEffect(() => {
-        loadMarket2Data();
-        return () => {
-            requestVersion2Ref.current += 1;
-            unsubscribe2();
-        };
-    }, [loadMarket2Data, unsubscribe2]);
-
-    // --- Scan all markets -----------------------------------------------------
-
-    const runMarketScan = useCallback(async () => {
-        if (!api_base.api || !showScanner) return;
-        const scanId = scanRequestRef.current + 1;
-        scanRequestRef.current = scanId;
-        setIsScanning(true);
-
-        try {
-            const results = await Promise.all(
-                MARKETS.map(async market => {
-                    try {
-                        const history = await (api_base.api as any).send({
-                            adjust_start_time: 1,
-                            count: SCAN_HISTORY_COUNT,
-                            end: 'latest',
-                            start: 1,
-                            style: 'ticks',
-                            ticks_history: market.symbol,
-                        });
-                        const prices: Array<number | string> = Array.isArray(history?.history?.prices) ? history.history.prices : [];
-                        const scanTicks = prices
-                            .map(price => ({ epoch: 0, quote: Number(price) }))
-                            .filter((tick): tick is TTick => Number.isFinite(tick.quote));
-                        if (scanTicks.length < SCAN_MIN_SAMPLE) return null;
-
-                        const isDigitPattern = strategyRef.current === 'digit_pattern';
-                        const { confidence, signal } = buildSignal(
-                            strategyRef.current, 
-                            scanTicks, 
-                            market.symbol,
-                            isDigitPattern ? m1PatternRef.current : undefined,
-                            isDigitPattern ? m1DigitConditionRef.current : undefined,
-                            isDigitPattern ? m1DigitCompareRef.current : undefined,
-                            isDigitPattern ? m1DigitWindowRef.current : undefined
-                        );
-                        return { confidence, label: market.label, signal, symbol: market.symbol } as TScanResult;
-                    } catch {
-                        return null;
-                    }
-                })
-            );
-
-            if (scanRequestRef.current !== scanId) return;
-
-            const ranked = results
-                .filter((row): row is TScanResult => row !== null)
-                .sort((a, b) => b.confidence - a.confidence);
-
-            setScanRanking(ranked.slice(0, SCAN_TOP_N));
-
-            if (ranked.length > 0 && !tradeActiveRef.current) {
-                const top = ranked[0];
-                setSymbol(prev => (prev !== top.symbol ? top.symbol : prev));
-
-                if (m2EnabledRef.current) {
-                    const second = ranked.find(row => row.symbol !== top.symbol);
-                    if (second) {
-                        setSymbol2(prev => (prev !== second.symbol ? second.symbol : prev));
-                    }
-                }
-            }
-        } finally {
-            if (scanRequestRef.current === scanId) setIsScanning(false);
-        }
-    }, [showScanner]);
-
-    useEffect(() => {
-        if (!showScanner || scanMode !== 'scan_all' || isRunning) return undefined;
-        void runMarketScan();
-        const intervalId = setInterval(() => {
-            void runMarketScan();
-        }, SCAN_INTERVAL_MS);
-        return () => clearInterval(intervalId);
-    }, [isRunning, runMarketScan, scanMode, showScanner]);
-
-    // --- Store wiring --------------------------------------------------------
+    // --- Store wiring (run panel / stop handler) -----------------------------
 
     const stopTrading = useCallback(() => {
         shouldStopRef.current = true;
-        tradeActiveRef.current = false;
         setIsRunning(false);
+        setIsScanning(false);
         consecutiveLossesRef.current = 0;
-        consecutiveRecoveryLossesRef.current = 0;
+        recoveryLossesRef.current = 0;
         currentStakeRef.current = baseStakeRef.current;
-        isRecoveryRef.current = false;
-        primarySignalRef.current = null;
-        recoverySignalRef.current = null;
-        activeMarketSlotRef.current = 'm1';
-        setActiveMarketSlot('m1');
+        activeSlotRef.current = 'm1';
         setConsecutiveLosses(0);
         setIsRecoveryMode(false);
+        setActiveSlotDisplay('m1');
+        setFocusSymbol(null);
 
         try {
             run_panel.setIsRunning(false);
@@ -845,7 +707,6 @@ const ProScanner = observer(() => {
                 globalObserver.unregister('bot.manual_stop', stopTrading);
             }
             shouldStopRef.current = true;
-            tradeActiveRef.current = false;
         };
     }, [dashboard, showScanner, stopTrading]);
 
@@ -865,7 +726,7 @@ const ProScanner = observer(() => {
     // --- Trade execution ------------------------------------------------------
 
     const runSingleTrade = useCallback(
-        async (signal: TSignal, stake: number, tradeSymbol: string, marketLabel: string): Promise<number> => {
+        async (signal: TSignal, symbol: string, stake: number): Promise<number> => {
             const parameters: Record<string, number | string> = {
                 amount: stake,
                 basis: 'stake',
@@ -873,11 +734,11 @@ const ProScanner = observer(() => {
                 currency,
                 duration: 1,
                 duration_unit: 't',
-                symbol: tradeSymbol,
+                symbol,
             };
             if (signal.barrier) parameters.barrier = signal.barrier;
 
-            pushLog('signal', `Buying ${signal.label} on ${marketLabel} · stake ${stake.toFixed(2)} ${currency}`);
+            pushLog('signal', `Buying ${signal.label} on ${labelForSymbol(symbol)} · stake ${stake.toFixed(2)} ${currency}`);
             const buy = await buyContractForUi({ parameters, price: stake, source: 'Scanner' });
             const buySnapshot = {
                 buy_price: buy.buy_price,
@@ -885,10 +746,10 @@ const ProScanner = observer(() => {
                 contract_type: signal.contractType,
                 currency,
                 date_start: Math.floor(Date.now() / 1000),
-                display_name: marketLabel,
-                shortcode: `SCANNER_${signal.contractType}_${tradeSymbol}`,
+                display_name: labelForSymbol(symbol),
+                shortcode: `SCANNER_${signal.contractType}_${symbol}`,
                 transaction_ids: { buy: buy.transaction_id },
-                underlying_symbol: tradeSymbol,
+                underlying_symbol: symbol,
             };
             pushContract(buySnapshot);
 
@@ -903,177 +764,114 @@ const ProScanner = observer(() => {
         [currency, pushContract, pushLog]
     );
 
-    const executeTradeFromTick = useCallback(
-        async (context: TMarketContext) => {
-            if (!tradeActiveRef.current || tradeInFlightRef.current || shouldStopRef.current) return;
-            if (context.slot !== activeMarketSlotRef.current) return;
-            if (context.ticks.length < MIN_SAMPLE_FOR_SIGNAL) return;
+    // --- M1/M2 recovery trading loop ------------------------------------------
+    //
+    // Flow: trade on M1. A win keeps trading M1 at base stake. A loss switches to
+    // M2 (if enabled) with a martingale stake — M1 stays blocked until M2 wins,
+    // at which point the cycle resets back to M1. If M2 is disabled, losses simply
+    // martingale on M1 itself. Each slot can independently be a fixed market or
+    // set to "auto", which scans every market and trades the strongest signal.
 
+    const runLoop = useCallback(async () => {
+        while (!shouldStopRef.current) {
             if (sessionPnlRef.current <= -stopLossRef.current) {
                 setNotification({ isTakeProfit: false, runs: completedRunsRef.current, totalPnl: sessionPnlRef.current });
-                stopTrading();
-                return;
+                break;
             }
             if (sessionPnlRef.current >= takeProfitRef.current) {
                 setNotification({ isTakeProfit: true, runs: completedRunsRef.current, totalPnl: sessionPnlRef.current });
-                stopTrading();
-                return;
+                break;
             }
             if (completedRunsRef.current >= runsToCheckRef.current && sessionPnlRef.current > 0.1) {
                 setNotification({ isTakeProfit: true, runs: completedRunsRef.current, totalPnl: sessionPnlRef.current });
-                stopTrading();
-                return;
+                break;
             }
 
-            const usesSameMarketRecovery =
-                !m2EnabledRef.current && context.strategyId === 'over_under' && primarySignalRef.current && recoverySignalRef.current;
-            
-            let currentSignal: TSignal;
-            
-            if (usesSameMarketRecovery) {
-                currentSignal = isRecoveryRef.current
-                    ? (recoverySignalRef.current as TSignal)
-                    : (primarySignalRef.current as TSignal);
-            } else {
-                const isDigitPattern = context.strategyId === 'digit_pattern';
-                let pattern = '';
-                let condition = '==';
-                let compare = '5';
-                let window = '3';
-                
-                if (context.slot === 'm1') {
-                    pattern = m1PatternRef.current;
-                    condition = m1DigitConditionRef.current;
-                    compare = m1DigitCompareRef.current;
-                    window = m1DigitWindowRef.current;
-                } else {
-                    pattern = m2PatternRef.current;
-                    condition = m2DigitConditionRef.current;
-                    compare = m2DigitCompareRef.current;
-                    window = m2DigitWindowRef.current;
-                }
-                
-                const result = buildSignal(
-                    context.strategyId, 
-                    context.ticks, 
-                    context.symbol,
-                    isDigitPattern ? pattern : undefined,
-                    isDigitPattern ? condition : undefined,
-                    isDigitPattern ? compare : undefined,
-                    isDigitPattern ? window : undefined
-                );
-                currentSignal = result.signal;
+            const slot = activeSlotRef.current;
+            const config = slot === 'm1' ? m1ConfigRef.current : m2ConfigRef.current;
+
+            setIsScanning(true);
+            pushLog(
+                'info',
+                `${slot.toUpperCase()}: scanning ${config.marketMode === 'auto' ? 'all markets' : labelForSymbol(config.symbol)} for a ${
+                    STRATEGIES.find(s => s.id === config.strategyId)?.label
+                } signal…`
+            );
+
+            let found: TScanResult | null = null;
+            try {
+                found = await evaluateSlot(config);
+            } catch (error) {
+                pushLog('error', error instanceof Error ? error.message : 'Market scan failed.');
             }
 
-            tradeInFlightRef.current = true;
+            if (shouldStopRef.current) break;
+            setIsScanning(false);
+
+            if (!found) {
+                await sleep(SCAN_RETRY_DELAY_MS);
+                continue;
+            }
+
+            setFocusSymbol(found.symbol);
+            pushLog('signal', `${slot.toUpperCase()} · ${labelForSymbol(found.symbol)}: ${found.signal.label}${config.marketMode === 'auto' ? ' (auto-picked)' : ''}`);
+
             const stake = currentStakeRef.current;
             setCurrentStakeDisplay(stake);
-            const marketLabel = MARKETS.find(m => m.symbol === context.symbol)?.label ?? context.symbol;
+            tradeInFlightRef.current = true;
 
             try {
-                const profit = await runSingleTrade(currentSignal, stake, context.symbol, marketLabel);
+                const profit = await runSingleTrade(found.signal, found.symbol, stake);
+                if (shouldStopRef.current) break;
                 const isWin = profit > 0;
 
                 if (isWin) {
-                    consecutiveLossesRef.current = 0;
-                    consecutiveRecoveryLossesRef.current = 0;
+                    pushLog('win', `Win! +${profit.toFixed(2)} ${currency}.`);
                     currentStakeRef.current = baseStakeRef.current;
-                    isRecoveryRef.current = false;
-
-                    if (m2EnabledRef.current && activeMarketSlotRef.current === 'm2') {
-                        activeMarketSlotRef.current = 'm1';
-                        setActiveMarketSlot('m1');
-                        pushLog('win', `Win on M2! +${profit.toFixed(2)} ${currency}. Recovery complete — back to M1, stake reset to ${baseStakeRef.current.toFixed(2)}.`);
-                    } else {
-                        pushLog('win', `Win! +${profit.toFixed(2)} ${currency}. Stake reset to ${baseStakeRef.current.toFixed(2)}.`);
+                    consecutiveLossesRef.current = 0;
+                    if (slot === 'm2') {
+                        pushLog('info', '✅ Recovery complete — back to M1.');
+                        activeSlotRef.current = 'm1';
+                        recoveryLossesRef.current = 0;
                     }
-                } else {
-                    consecutiveLossesRef.current += 1;
-
+                } else if (slot === 'm1') {
                     if (m2EnabledRef.current) {
-                        if (context.slot === 'm1') {
-                            activeMarketSlotRef.current = 'm2';
-                            setActiveMarketSlot('m2');
-                            isRecoveryRef.current = true;
-                            consecutiveRecoveryLossesRef.current = 1;
-                            currentStakeRef.current = baseStakeRef.current * martingaleRef.current;
-                            pushLog(
-                                'loss',
-                                `Loss on M1 (${selectedMarket.label}). Switching to M2 (${selectedMarket2.label}) for recovery. Next stake ${currentStakeRef.current.toFixed(2)} ${currency}.`
-                            );
-                        } else {
-                            consecutiveRecoveryLossesRef.current += 1;
-                            currentStakeRef.current = baseStakeRef.current * Math.pow(martingaleRef.current, consecutiveRecoveryLossesRef.current);
-                            pushLog(
-                                'loss',
-                                `Loss on M2 recovery (${consecutiveRecoveryLossesRef.current}). Staying on M2. Next stake ${currentStakeRef.current.toFixed(2)} ${currency}.`
-                            );
-                        }
-                    } else if (usesSameMarketRecovery) {
-                        if (isRecoveryRef.current) {
-                            consecutiveRecoveryLossesRef.current += 1;
-                            currentStakeRef.current = baseStakeRef.current * Math.pow(martingaleRef.current, consecutiveRecoveryLossesRef.current);
-                            pushLog('loss', `Recovery loss (${consecutiveRecoveryLossesRef.current}). Next stake ${currentStakeRef.current.toFixed(2)} ${currency}.`);
-                        } else {
-                            isRecoveryRef.current = true;
-                            consecutiveRecoveryLossesRef.current = 1;
-                            currentStakeRef.current = baseStakeRef.current * martingaleRef.current;
-                            pushLog(
-                                'loss',
-                                `Primary loss. Switching to recovery signal (${recoverySignalRef.current?.label}). Next stake ${currentStakeRef.current.toFixed(2)} ${currency}.`
-                            );
-                        }
+                        activeSlotRef.current = 'm2';
+                        recoveryLossesRef.current = 1;
+                        currentStakeRef.current = baseStakeRef.current * martingaleRef.current;
+                        pushLog('loss', `Loss on M1 (${profit.toFixed(2)} ${currency}) — switching to M2 recovery. Next stake ${currentStakeRef.current.toFixed(2)} ${currency}.`);
                     } else {
+                        consecutiveLossesRef.current += 1;
                         currentStakeRef.current = baseStakeRef.current * Math.pow(martingaleRef.current, consecutiveLossesRef.current);
                         pushLog('loss', `Loss (${profit.toFixed(2)} ${currency}). Next stake ${currentStakeRef.current.toFixed(2)} ${currency}.`);
                     }
+                } else {
+                    recoveryLossesRef.current += 1;
+                    currentStakeRef.current = baseStakeRef.current * Math.pow(martingaleRef.current, recoveryLossesRef.current);
+                    pushLog(
+                        'loss',
+                        `Loss on M2 (${profit.toFixed(2)} ${currency}) — continuing recovery (attempt ${recoveryLossesRef.current}). Next stake ${currentStakeRef.current.toFixed(2)} ${currency}.`
+                    );
                 }
 
+                setActiveSlotDisplay(activeSlotRef.current);
+                setIsRecoveryMode(activeSlotRef.current === 'm2');
                 setConsecutiveLosses(consecutiveLossesRef.current);
-                setIsRecoveryMode(isRecoveryRef.current);
 
                 const total = Number((sessionPnlRef.current + profit).toFixed(8));
                 sessionPnlRef.current = total;
                 completedRunsRef.current += 1;
                 setSessionPnl(total);
                 setCompletedRuns(completedRunsRef.current);
-
-                if (total <= -stopLossRef.current) {
-                    setNotification({ isTakeProfit: false, runs: completedRunsRef.current, totalPnl: total });
-                    stopTrading();
-                } else if (total >= takeProfitRef.current) {
-                    setNotification({ isTakeProfit: true, runs: completedRunsRef.current, totalPnl: total });
-                    stopTrading();
-                } else if (completedRunsRef.current >= runsToCheckRef.current && total > 0.1) {
-                    setNotification({ isTakeProfit: true, runs: completedRunsRef.current, totalPnl: total });
-                    stopTrading();
-                }
             } catch (error) {
-                const message = error instanceof Error ? error.message : 'Trade failed.';
-                pushLog('error', message);
-                stopTrading();
+                pushLog('error', error instanceof Error ? error.message : 'Trade failed.');
+                break;
             } finally {
                 tradeInFlightRef.current = false;
-                if (tradeActiveRef.current && !shouldStopRef.current) {
-                    setTimeout(() => {
-                        const slot = activeMarketSlotRef.current;
-                        const nextContext: TMarketContext =
-                            slot === 'm1'
-                                ? { slot, strategyId: strategyRef.current, symbol: symbolRef.current, ticks: ticksRef.current }
-                                : { slot, strategyId: strategy2Ref.current, symbol: symbol2Ref.current, ticks: ticks2Ref.current };
-                        handleTradeTickRef.current(nextContext);
-                    }, 0);
-                }
             }
-        },
-        [currency, pushLog, runSingleTrade, selectedMarket.label, selectedMarket2.label, stopTrading]
-    );
-
-    useEffect(() => {
-        handleTradeTickRef.current = context => {
-            void executeTradeFromTick(context);
-        };
-    }, [executeTradeFromTick]);
+        }
+        stopTrading();
+    }, [currency, pushLog, runSingleTrade, stopTrading]);
 
     const startTrading = useCallback(() => {
         const stake = Number(stakeInput);
@@ -1089,14 +887,18 @@ const ProScanner = observer(() => {
             pushLog('error', 'Enter valid Stop Loss and Take Profit amounts.');
             return;
         }
-        if (!hasEnoughSamples || !preview) {
-            pushLog('error', `Collecting M1 ticks (${digits.length}/${MIN_SAMPLE_FOR_SIGNAL}) — wait a moment before starting.`);
+        if (m1.strategyId === 'pattern' && m1.pattern.replace(/[^EO]/g, '').length < 2) {
+            pushLog('error', 'M1 pattern needs at least 2 E/O characters.');
             return;
         }
-        if (m2Enabled && (!hasEnoughSamples2 || !preview2)) {
-            pushLog('error', `Collecting M2 ticks (${digits2.length}/${MIN_SAMPLE_FOR_SIGNAL}) — wait a moment before starting.`);
+        if (m2Enabled && m2.strategyId === 'pattern' && m2.pattern.replace(/[^EO]/g, '').length < 2) {
+            pushLog('error', 'M2 pattern needs at least 2 E/O characters.');
             return;
         }
+
+        m1ConfigRef.current = { ...m1 };
+        m2ConfigRef.current = { ...m2 };
+        m2EnabledRef.current = m2Enabled;
 
         baseStakeRef.current = stake;
         currentStakeRef.current = stake;
@@ -1104,47 +906,28 @@ const ProScanner = observer(() => {
         takeProfitRef.current = takeProfit;
         runsToCheckRef.current = runs;
         consecutiveLossesRef.current = 0;
-        consecutiveRecoveryLossesRef.current = 0;
-        isRecoveryRef.current = false;
+        recoveryLossesRef.current = 0;
+        activeSlotRef.current = 'm1';
         completedRunsRef.current = 0;
         sessionPnlRef.current = 0;
         shouldStopRef.current = false;
-        tradeActiveRef.current = true;
         tradeInFlightRef.current = false;
-        activeMarketSlotRef.current = 'm1';
-
-        const { signal } = preview;
-        if (!m2Enabled && strategyId === 'over_under' && signal.recoveryContractType && signal.recoveryLabel) {
-            primarySignalRef.current = { barrier: signal.barrier, contractType: signal.contractType, label: signal.label };
-            recoverySignalRef.current = {
-                barrier: signal.recoveryBarrier,
-                contractType: signal.recoveryContractType,
-                label: signal.recoveryLabel,
-            };
-        } else {
-            primarySignalRef.current = null;
-            recoverySignalRef.current = null;
-        }
+        martingaleRef.current = martingale;
 
         setSessionPnl(0);
         setCompletedRuns(0);
         setConsecutiveLosses(0);
         setIsRecoveryMode(false);
-        setActiveMarketSlot('m1');
+        setActiveSlotDisplay('m1');
+        setFocusSymbol(null);
         setCurrentStakeDisplay(stake);
         setIsRunning(true);
         setLog([]);
-        
-        const strategyLabel = STRATEGIES.find(s => s.id === strategyId)?.label || strategyId;
-        pushLog('info', `Started ${strategyLabel} on ${selectedMarket.label} (M1).`);
-        
-        if (strategyId === 'digit_pattern') {
-            pushLog('info', `Digit Pattern: "${cleanM1Pattern}" | Condition: ${m1DigitCondition} ${m1DigitCompare} | Window: ${m1DigitWindow}`);
-        }
-        
+        pushLog('info', `Started. M1: ${m1.marketMode === 'auto' ? 'auto-scan all markets' : labelForSymbol(m1.symbol)} · ${STRATEGIES.find(s => s.id === m1.strategyId)?.label}.`);
         if (m2Enabled) {
-            const strategy2Label = STRATEGIES.find(s => s.id === strategyId2)?.label || strategyId2;
-            pushLog('info', `Dual-market recovery active: losses on M1 switch to ${strategy2Label} on ${selectedMarket2.label} (M2).`);
+            pushLog('info', `M2 recovery: ${m2.marketMode === 'auto' ? 'auto-scan all markets' : labelForSymbol(m2.symbol)} · ${STRATEGIES.find(s => s.id === m2.strategyId)?.label}.`);
+        } else {
+            pushLog('info', 'M2 recovery disabled — losses will martingale on M1.');
         }
         pushLog('info', `Stake ${stake} ${currency} · Martingale x${martingale} · SL ${stopLoss} · TP ${takeProfit} · Runs ${runs}`);
 
@@ -1157,59 +940,8 @@ const ProScanner = observer(() => {
             // run panel may not be mounted yet
         }
         dashboard.setActiveTradingModule('pro_scanner');
-        handleTradeTickRef.current({ slot: 'm1', strategyId, symbol, ticks: ticksRef.current });
-    }, [
-        currency,
-        dashboard,
-        digits.length,
-        digits2.length,
-        hasEnoughSamples,
-        hasEnoughSamples2,
-        m2Enabled,
-        martingale,
-        preview,
-        preview2,
-        pushLog,
-        runsInput,
-        run_panel,
-        selectedMarket.label,
-        selectedMarket2.label,
-        stakeInput,
-        stopLossInput,
-        strategyId,
-        strategyId2,
-        symbol,
-        takeProfitInput,
-        cleanM1Pattern,
-        m1DigitCondition,
-        m1DigitCompare,
-        m1DigitWindow,
-    ]);
-
-    const handleMarketChange = (nextSymbol: string) => {
-        stopTrading();
-        setSymbol(nextSymbol);
-    };
-    const handleStrategyChange = (next: TStrategyId) => {
-        stopTrading();
-        setStrategyId(next);
-    };
-    const handleMarket2Change = (nextSymbol: string) => {
-        stopTrading();
-        setSymbol2(nextSymbol);
-    };
-    const handleStrategy2Change = (next: TStrategyId) => {
-        stopTrading();
-        setStrategyId2(next);
-    };
-    const handleToggleM2 = () => {
-        stopTrading();
-        setM2Enabled(prev => !prev);
-    };
-    const handleScanModeChange = (mode: 'manual' | 'scan_all') => {
-        stopTrading();
-        setScanMode(mode);
-    };
+        void runLoop();
+    }, [dashboard, m1, m2, m2Enabled, martingale, pushLog, runLoop, runsInput, run_panel, stakeInput, stopLossInput, takeProfitInput]);
 
     if (!showScanner) return null;
 
@@ -1219,7 +951,7 @@ const ProScanner = observer(() => {
                 <div className='scanner2-header'>
                     <div>
                         <h1 className='scanner2-header__title'>Pro Scanner Bot</h1>
-                        <p className='scanner2-header__subtitle'>Live digit analysis with martingale, dual-market recovery &amp; all-market scanning</p>
+                        <p className='scanner2-header__subtitle'>Dual-market recovery scanning with pattern, digit &amp; classic strategies</p>
                     </div>
                     <div className={classNames('scanner2-status', { 'scanner2-status--live': isConnected })}>
                         <span className='scanner2-status__dot' />
@@ -1231,166 +963,6 @@ const ProScanner = observer(() => {
                     {/* Left: configuration */}
                     <div className='scanner2-panel'>
                         <h2 className='scanner2-panel__title'>Configuration</h2>
-
-                        <div className='scanner2-segmented'>
-                            <button
-                                type='button'
-                                className={classNames('scanner2-segmented__btn', { 'scanner2-segmented__btn--active': scanMode === 'manual' })}
-                                disabled={isRunning}
-                                onClick={() => handleScanModeChange('manual')}
-                            >
-                                Manual Market
-                            </button>
-                            <button
-                                type='button'
-                                className={classNames('scanner2-segmented__btn', { 'scanner2-segmented__btn--active': scanMode === 'scan_all' })}
-                                disabled={isRunning}
-                                onClick={() => handleScanModeChange('scan_all')}
-                            >
-                                Scan All Markets
-                            </button>
-                        </div>
-
-                        {scanMode === 'manual' ? (
-                            <label className='scanner2-field'>
-                                <span>Market (M1)</span>
-                                <select value={symbol} disabled={isRunning} onChange={e => handleMarketChange(e.target.value)}>
-                                    {MARKETS.map(market => (
-                                        <option key={market.symbol} value={market.symbol}>
-                                            {market.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-                        ) : (
-                            <div className='scanner2-scan'>
-                                <div className='scanner2-scan__header'>
-                                    <span>{isScanning ? 'Scanning all markets…' : 'Auto-picked market (M1)'}</span>
-                                    <button type='button' className='scanner2-scan__rescan' disabled={isRunning} onClick={() => void runMarketScan()}>
-                                        ↻ Rescan
-                                    </button>
-                                </div>
-                                <p className='scanner2-scan__pick'>
-                                    {selectedMarket.label}
-                                    {scanRanking[0] && <span className='scanner2-scan__confidence'> · {scanRanking[0].confidence.toFixed(1)}% confidence</span>}
-                                </p>
-                                {scanRanking.length > 0 && (
-                                    <ul className='scanner2-scan__list'>
-                                        {scanRanking.map(row => (
-                                            <li key={row.symbol} className={classNames('scanner2-scan__row', { 'scanner2-scan__row--active': row.symbol === symbol || (m2Enabled && row.symbol === symbol2) })}>
-                                                <span>{row.label}</span>
-                                                <span>{row.confidence.toFixed(1)}%</span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                )}
-                            </div>
-                        )}
-
-                        <label className='scanner2-field'>
-                            <span>Strategy (M1)</span>
-                            <select value={strategyId} disabled={isRunning} onChange={e => handleStrategyChange(e.target.value as TStrategyId)}>
-                                {STRATEGIES.map(strat => (
-                                    <option key={strat.id} value={strat.id}>
-                                        {strat.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-
-                        {/* Digit Pattern Strategy Controls for M1 */}
-                        {strategyId === 'digit_pattern' && (
-                            <div className='scanner2-digit-pattern'>
-                                <div className='scanner2-digit-pattern__mode'>
-                                    <span>Strategy Mode</span>
-                                    <div className='scanner2-digit-pattern__mode-buttons'>
-                                        <button
-                                            type='button'
-                                            className={classNames('scanner2-digit-pattern__mode-btn', { active: m1StrategyMode === 'pattern' })}
-                                            onClick={() => setM1StrategyMode('pattern')}
-                                            disabled={isRunning}
-                                        >
-                                            Pattern
-                                        </button>
-                                        <button
-                                            type='button'
-                                            className={classNames('scanner2-digit-pattern__mode-btn', { active: m1StrategyMode === 'digit' })}
-                                            onClick={() => setM1StrategyMode('digit')}
-                                            disabled={isRunning}
-                                        >
-                                            Digit
-                                        </button>
-                                        <button
-                                            type='button'
-                                            className={classNames('scanner2-digit-pattern__mode-btn', { active: m1StrategyMode === 'both' })}
-                                            onClick={() => setM1StrategyMode('both')}
-                                            disabled={isRunning}
-                                        >
-                                            Both
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {(m1StrategyMode === 'pattern' || m1StrategyMode === 'both') && (
-                                    <div className='scanner2-digit-pattern__field'>
-                                        <label>Pattern (E=Even, O=Odd)</label>
-                                        <input
-                                            type='text'
-                                            placeholder='e.g. EEOE'
-                                            value={m1Pattern}
-                                            onChange={e => setM1Pattern(e.target.value.toUpperCase().replace(/[^EO]/g, ''))}
-                                            disabled={isRunning}
-                                            className='scanner2-digit-pattern__input'
-                                        />
-                                        <span className='scanner2-digit-pattern__hint'>
-                                            {cleanM1Pattern.length >= 2 ? `✅ Pattern: ${cleanM1Pattern}` : '⚠️ Need at least 2 characters'}
-                                        </span>
-                                    </div>
-                                )}
-
-                                {(m1StrategyMode === 'digit' || m1StrategyMode === 'both') && (
-                                    <div className='scanner2-digit-pattern__row'>
-                                        <div className='scanner2-digit-pattern__field'>
-                                            <label>Window</label>
-                                            <input
-                                                type='number'
-                                                min='1'
-                                                max='50'
-                                                value={m1DigitWindow}
-                                                onChange={e => setM1DigitWindow(e.target.value)}
-                                                disabled={isRunning}
-                                                className='scanner2-digit-pattern__input'
-                                            />
-                                        </div>
-                                        <div className='scanner2-digit-pattern__field'>
-                                            <label>Condition</label>
-                                            <select
-                                                value={m1DigitCondition}
-                                                onChange={e => setM1DigitCondition(e.target.value)}
-                                                disabled={isRunning}
-                                                className='scanner2-digit-pattern__select'
-                                            >
-                                                {DIGIT_CONDITIONS.map(c => (
-                                                    <option key={c} value={c}>{c}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className='scanner2-digit-pattern__field'>
-                                            <label>Digit</label>
-                                            <input
-                                                type='number'
-                                                min='0'
-                                                max='9'
-                                                value={m1DigitCompare}
-                                                onChange={e => setM1DigitCompare(e.target.value)}
-                                                disabled={isRunning}
-                                                className='scanner2-digit-pattern__input'
-                                            />
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
 
                         <div className='scanner2-field-row'>
                             <label className='scanner2-field'>
@@ -1425,145 +997,31 @@ const ProScanner = observer(() => {
                             <input inputMode='numeric' disabled={isRunning} value={runsInput} onChange={e => setRunsInput(cleanInt(e.target.value))} />
                         </label>
 
-                        <div className='scanner2-m2-toggle'>
-                            <div>
-                                <p className='scanner2-m2-toggle__title'>Dual-Market Recovery (M2)</p>
-                                <p className='scanner2-m2-toggle__hint'>On a loss, switch to M2 with a martingale stake. On a win, return to M1.</p>
+                        <div className='scanner2-slot'>
+                            <div className='scanner2-slot__header'>
+                                <span>Market 1 · Primary</span>
                             </div>
-                            <button
-                                type='button'
-                                className={classNames('scanner2-m2-toggle__switch', { 'scanner2-m2-toggle__switch--on': m2Enabled })}
-                                disabled={isRunning}
-                                onClick={handleToggleM2}
-                            >
-                                {m2Enabled ? 'ON' : 'OFF'}
-                            </button>
+                            <SlotFields config={m1} disabled={isRunning} onChange={setM1} />
                         </div>
 
-                        {m2Enabled && (
-                            <>
-                                {scanMode === 'manual' ? (
-                                    <label className='scanner2-field'>
-                                        <span>Market (M2 — recovery)</span>
-                                        <select value={symbol2} disabled={isRunning} onChange={e => handleMarket2Change(e.target.value)}>
-                                            {MARKETS.map(market => (
-                                                <option key={market.symbol} value={market.symbol}>
-                                                    {market.label}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </label>
-                                ) : (
-                                    <p className='scanner2-scan__pick scanner2-scan__pick--m2'>
-                                        M2 (recovery): {selectedMarket2.label}
-                                    </p>
-                                )}
-                                <label className='scanner2-field'>
-                                    <span>Strategy (M2 — recovery)</span>
-                                    <select value={strategyId2} disabled={isRunning} onChange={e => handleStrategy2Change(e.target.value as TStrategyId)}>
-                                        {STRATEGIES.map(strat => (
-                                            <option key={strat.id} value={strat.id}>
-                                                {strat.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
-
-                                {/* Digit Pattern Strategy Controls for M2 */}
-                                {strategyId2 === 'digit_pattern' && (
-                                    <div className='scanner2-digit-pattern'>
-                                        <div className='scanner2-digit-pattern__mode'>
-                                            <span>Strategy Mode</span>
-                                            <div className='scanner2-digit-pattern__mode-buttons'>
-                                                <button
-                                                    type='button'
-                                                    className={classNames('scanner2-digit-pattern__mode-btn', { active: m2StrategyMode === 'pattern' })}
-                                                    onClick={() => setM2StrategyMode('pattern')}
-                                                    disabled={isRunning}
-                                                >
-                                                    Pattern
-                                                </button>
-                                                <button
-                                                    type='button'
-                                                    className={classNames('scanner2-digit-pattern__mode-btn', { active: m2StrategyMode === 'digit' })}
-                                                    onClick={() => setM2StrategyMode('digit')}
-                                                    disabled={isRunning}
-                                                >
-                                                    Digit
-                                                </button>
-                                                <button
-                                                    type='button'
-                                                    className={classNames('scanner2-digit-pattern__mode-btn', { active: m2StrategyMode === 'both' })}
-                                                    onClick={() => setM2StrategyMode('both')}
-                                                    disabled={isRunning}
-                                                >
-                                                    Both
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {(m2StrategyMode === 'pattern' || m2StrategyMode === 'both') && (
-                                            <div className='scanner2-digit-pattern__field'>
-                                                <label>Pattern (E=Even, O=Odd)</label>
-                                                <input
-                                                    type='text'
-                                                    placeholder='e.g. EEOE'
-                                                    value={m2Pattern}
-                                                    onChange={e => setM2Pattern(e.target.value.toUpperCase().replace(/[^EO]/g, ''))}
-                                                    disabled={isRunning}
-                                                    className='scanner2-digit-pattern__input'
-                                                />
-                                                <span className='scanner2-digit-pattern__hint'>
-                                                    {cleanM2Pattern.length >= 2 ? `✅ Pattern: ${cleanM2Pattern}` : '⚠️ Need at least 2 characters'}
-                                                </span>
-                                            </div>
-                                        )}
-
-                                        {(m2StrategyMode === 'digit' || m2StrategyMode === 'both') && (
-                                            <div className='scanner2-digit-pattern__row'>
-                                                <div className='scanner2-digit-pattern__field'>
-                                                    <label>Window</label>
-                                                    <input
-                                                        type='number'
-                                                        min='1'
-                                                        max='50'
-                                                        value={m2DigitWindow}
-                                                        onChange={e => setM2DigitWindow(e.target.value)}
-                                                        disabled={isRunning}
-                                                        className='scanner2-digit-pattern__input'
-                                                    />
-                                                </div>
-                                                <div className='scanner2-digit-pattern__field'>
-                                                    <label>Condition</label>
-                                                    <select
-                                                        value={m2DigitCondition}
-                                                        onChange={e => setM2DigitCondition(e.target.value)}
-                                                        disabled={isRunning}
-                                                        className='scanner2-digit-pattern__select'
-                                                    >
-                                                        {DIGIT_CONDITIONS.map(c => (
-                                                            <option key={c} value={c}>{c}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <div className='scanner2-digit-pattern__field'>
-                                                    <label>Digit</label>
-                                                    <input
-                                                        type='number'
-                                                        min='0'
-                                                        max='9'
-                                                        value={m2DigitCompare}
-                                                        onChange={e => setM2DigitCompare(e.target.value)}
-                                                        disabled={isRunning}
-                                                        className='scanner2-digit-pattern__input'
-                                                    />
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </>
-                        )}
+                        <div className='scanner2-slot'>
+                            <div className='scanner2-slot__header'>
+                                <span>Market 2 · Recovery</span>
+                                <button
+                                    type='button'
+                                    className={classNames('scanner2-toggle', { 'scanner2-toggle--on': m2Enabled })}
+                                    disabled={isRunning}
+                                    onClick={() => setM2Enabled(prev => !prev)}
+                                >
+                                    {m2Enabled ? 'ON' : 'OFF'}
+                                </button>
+                            </div>
+                            {m2Enabled ? (
+                                <SlotFields config={m2} disabled={isRunning} onChange={setM2} />
+                            ) : (
+                                <p className='scanner2-sample'>M2 is off — a loss on M1 will martingale on M1 itself instead of switching markets.</p>
+                            )}
+                        </div>
 
                         {!isRunning ? (
                             <button className='scanner2-btn scanner2-btn--start' type='button' onClick={startTrading}>
@@ -1578,17 +1036,17 @@ const ProScanner = observer(() => {
 
                     {/* Middle: live market view */}
                     <div className='scanner2-panel'>
-                        <h2 className='scanner2-panel__title'>
-                            {selectedMarket.label}
-                            {isRunning && m2Enabled && (
-                                <span className={classNames('scanner2-active-badge', { 'scanner2-active-badge--m2': activeMarketSlot === 'm2' })}>
-                                    {activeMarketSlot === 'm1' ? 'M1 ACTIVE' : 'M2 ACTIVE'}
+                        <div className='scanner2-panel__title-row'>
+                            <h2 className='scanner2-panel__title'>{labelForSymbol(displaySymbol)}</h2>
+                            {isRunning && (
+                                <span className={classNames('scanner2-slot-badge', { 'scanner2-slot-badge--m2': activeSlotDisplay === 'm2' })}>
+                                    {activeSlotDisplay === 'm2' ? 'M2 recovery' : 'M1 primary'}
                                 </span>
                             )}
-                        </h2>
+                        </div>
 
                         <div className='scanner2-price'>
-                            <span className='scanner2-price__value'>{latestTick ? latestTick.quote.toFixed(getMarketPipSize(symbol)) : '—'}</span>
+                            <span className='scanner2-price__value'>{latestTick ? latestTick.quote.toFixed(getMarketPipSize(displaySymbol)) : '—'}</span>
                             <span className='scanner2-price__digit'>{latestDigit ?? '–'}</span>
                         </div>
 
@@ -1603,47 +1061,27 @@ const ProScanner = observer(() => {
                                 </div>
                             ))}
                         </div>
-                        <p className='scanner2-sample'>
-                            {digits.length}/{MIN_SAMPLE_FOR_SIGNAL} ticks collected {hasEnoughSamples ? '· ready' : '· warming up'}
-                        </p>
+
+                        {isRunning ? (
+                            <p className='scanner2-sample'>{isScanning ? 'Scanning for a signal…' : `Trading on ${labelForSymbol(displaySymbol)}`}</p>
+                        ) : (
+                            <p className='scanner2-sample'>
+                                {digits.length}/{MIN_SAMPLE_FOR_SIGNAL} ticks collected {hasEnoughSamples ? '· ready' : '· warming up'}
+                                {m1.marketMode === 'auto' && ' · M1 is set to auto-scan all markets, so no single-market preview is shown until you start'}
+                            </p>
+                        )}
 
                         {preview && (
                             <div className='scanner2-signal'>
                                 <p className='scanner2-signal__label'>
-                                    Suggested signal: <strong>{preview.signal.label}</strong>
+                                    M1 preview signal: <strong>{preview.signal.label}</strong>
                                     {preview.signal.recoveryLabel && <> · recovery <strong>{preview.signal.recoveryLabel}</strong></>}
-                                    {' · '}
-                                    <span className='scanner2-signal__confidence'>{preview.confidence.toFixed(1)}% confidence</span>
                                 </p>
                                 {preview.lines.map((line, idx) => (
                                     <p key={idx} className='scanner2-signal__line'>
                                         {line}
                                     </p>
                                 ))}
-                            </div>
-                        )}
-
-                        {m2Enabled && (
-                            <div className={classNames('scanner2-m2-panel', { 'scanner2-m2-panel--active': activeMarketSlot === 'm2' })}>
-                                <p className='scanner2-m2-panel__title'>
-                                    M2 · {selectedMarket2.label}
-                                    <span className={classNames('scanner2-status', 'scanner2-status--inline', { 'scanner2-status--live': isConnected2 })}>
-                                        <span className='scanner2-status__dot' />
-                                        {isConnected2 ? 'Live' : 'Connecting…'}
-                                    </span>
-                                </p>
-                                <div className='scanner2-m2-panel__row'>
-                                    <span>{latestTick2 ? latestTick2.quote.toFixed(getMarketPipSize(symbol2)) : '—'}</span>
-                                    <span className='scanner2-price__digit scanner2-price__digit--small'>{latestDigit2 ?? '–'}</span>
-                                    {preview2 && (
-                                        <span className='scanner2-m2-panel__signal'>
-                                            {preview2.signal.label} · {preview2.confidence.toFixed(1)}%
-                                        </span>
-                                    )}
-                                </div>
-                                <p className='scanner2-sample'>
-                                    {digits2.length}/{MIN_SAMPLE_FOR_SIGNAL} ticks collected {hasEnoughSamples2 ? '· ready' : '· warming up'}
-                                </p>
                             </div>
                         )}
 
@@ -1672,11 +1110,7 @@ const ProScanner = observer(() => {
                                     <span>Losses in a row</span>
                                     <strong>{consecutiveLosses}</strong>
                                 </div>
-                                {isRecoveryMode && (
-                                    <div className='scanner2-recovery-badge'>
-                                        {m2Enabled ? `Recovery mode active — trading on ${activeMarketSlot.toUpperCase()}` : 'Recovery mode active'}
-                                    </div>
-                                )}
+                                {isRecoveryMode && <div className='scanner2-recovery-badge'>Recovery mode active — trading M2</div>}
                             </div>
                         )}
                     </div>
