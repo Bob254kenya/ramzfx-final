@@ -17,7 +17,7 @@ import './pro-scanner.scss';
 
 type TTick = { epoch: number; quote: number };
 
-type TStrategyId = 'over_under' | 'even_odd' | 'matches_differs' | 'rise_fall';
+type TStrategyId = 'over_under' | 'even_odd' | 'matches_differs' | 'rise_fall' | 'digit_pattern';
 
 type TContractType = 'DIGITOVER' | 'DIGITUNDER' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITMATCH' | 'DIGITDIFF' | 'CALL' | 'PUT';
 
@@ -68,6 +68,7 @@ const STRATEGIES: { id: TStrategyId; label: string }[] = [
     { id: 'even_odd', label: 'Even & Odd' },
     { id: 'matches_differs', label: 'Matches & Differs' },
     { id: 'rise_fall', label: 'Rise & Fall' },
+    { id: 'digit_pattern', label: 'Digit Pattern' },
 ];
 
 const MAX_TICKS = 1000;
@@ -80,12 +81,17 @@ const DEFAULT_RUNS = '5';
 const MARTINGALE_STEPS = [1, 1.2, 1.5, 1.8, 2, 2.2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10];
 const MAX_LOG_ENTRIES = 120;
 
-// Scan-all-markets tuning: a lighter tick sample is enough to rank markets,
-// and we don't need to re-rank more than a couple of times a minute.
+// Scan-all-markets tuning
 const SCAN_HISTORY_COUNT = 150;
 const SCAN_MIN_SAMPLE = 60;
 const SCAN_INTERVAL_MS = 6000;
 const SCAN_TOP_N = 5;
+
+// Digit Pattern Strategy Constants
+const DIGIT_CONDITIONS = ['==', '>', '<', '>=', '<='];
+const DEFAULT_DIGIT_WINDOW = '3';
+const DEFAULT_DIGIT_COMPARE = '5';
+const DEFAULT_PATTERN = '';
 
 // ============================================================================
 // Pure helpers
@@ -105,16 +111,112 @@ const digitStatsFrom = (digits: number[]) => {
     return counts.map(count => Number(((count / total) * 100).toFixed(1)));
 };
 
-/** Builds a trade signal for the selected strategy from the current tick window, plus a
- *  0-100 "confidence" score used to rank markets against each other (scan-all mode). */
-const buildSignal = (strategyId: TStrategyId, ticks: TTick[], symbol: string): { confidence: number; lines: string[]; signal: TSignal } => {
+/** Check if a digit pattern matches (E=Even, O=Odd) */
+const checkPatternMatch = (digits: number[], pattern: string): boolean => {
+    if (pattern.length === 0 || digits.length < pattern.length) return false;
+    const recent = digits.slice(-pattern.length);
+    for (let i = 0; i < pattern.length; i++) {
+        const expected = pattern[i];
+        const actual = recent[i] % 2 === 0 ? 'E' : 'O';
+        if (expected !== actual) return false;
+    }
+    return true;
+};
+
+/** Check if digit condition is met */
+const checkDigitCondition = (digits: number[], condition: string, compare: number, window: number): boolean => {
+    if (digits.length < window) return false;
+    const recent = digits.slice(-window);
+    return recent.every(d => {
+        switch (condition) {
+            case '>': return d > compare;
+            case '<': return d < compare;
+            case '>=': return d >= compare;
+            case '<=': return d <= compare;
+            case '==': return d === compare;
+            default: return false;
+        }
+    });
+};
+
+/** Builds a trade signal for the selected strategy from the current tick window */
+const buildSignal = (
+    strategyId: TStrategyId, 
+    ticks: TTick[], 
+    symbol: string,
+    digitPattern?: string,
+    digitCondition?: string,
+    digitCompare?: string,
+    digitWindow?: string
+): { confidence: number; lines: string[]; signal: TSignal } => {
     const digits = digitsFromTicks(ticks, symbol);
     const sample = Math.max(digits.length, 1);
     const lines: string[] = [];
 
+    // Digit Pattern Strategy
+    if (strategyId === 'digit_pattern') {
+        const pattern = digitPattern?.toUpperCase().replace(/[^EO]/g, '') || '';
+        const condition = digitCondition || '==';
+        const compare = parseInt(digitCompare || '5');
+        const window = parseInt(digitWindow || '3');
+        
+        let patternMatched = false;
+        let conditionMatched = false;
+        
+        if (pattern.length >= 2) {
+            patternMatched = checkPatternMatch(digits, pattern);
+        }
+        
+        if (digits.length >= window) {
+            conditionMatched = checkDigitCondition(digits, condition, compare, window);
+        }
+        
+        // Determine signal based on pattern and condition
+        if (patternMatched && conditionMatched) {
+            lines.push(`✅ Pattern "${pattern}" matched in last ${pattern.length} ticks.`);
+            lines.push(`✅ Digit condition ${condition} ${compare} met in last ${window} ticks.`);
+            // Default to EVEN when both match
+            return {
+                confidence: 85,
+                lines,
+                signal: { contractType: 'DIGITEVEN', label: 'Even' },
+            };
+        } else if (patternMatched) {
+            lines.push(`✅ Pattern "${pattern}" matched in last ${pattern.length} ticks.`);
+            lines.push(`⏳ Waiting for digit condition ${condition} ${compare} in last ${window} ticks.`);
+            return {
+                confidence: 70,
+                lines,
+                signal: { contractType: 'DIGITEVEN', label: 'Even' },
+            };
+        } else if (conditionMatched) {
+            lines.push(`✅ Digit condition ${condition} ${compare} met in last ${window} ticks.`);
+            lines.push(`⏳ Waiting for pattern "${pattern}" in last ${pattern.length} ticks.`);
+            return {
+                confidence: 70,
+                lines,
+                signal: { contractType: 'DIGITEVEN', label: 'Even' },
+            };
+        }
+        
+        // Fallback: use most common digit
+        const stats = digitStatsFrom(digits);
+        let mostCommon = 0;
+        stats.forEach((pct, digit) => {
+            if (pct > stats[mostCommon]) mostCommon = digit;
+        });
+        lines.push(`📊 Most common digit: ${mostCommon} (${stats[mostCommon]}%)`);
+        lines.push(`📊 Pattern "${pattern}" not matched, condition ${condition} ${compare} not met.`);
+        return {
+            confidence: Math.max(0, stats[mostCommon] - 10),
+            lines,
+            signal: { barrier: String(mostCommon), contractType: 'DIGITMATCH', label: `Match ${mostCommon}` },
+        };
+    }
+
     if (strategyId === 'over_under') {
-        let lowCount = 0; // 0-4
-        let highCount = 0; // 5-9
+        let lowCount = 0;
+        let highCount = 0;
         digits.forEach(d => (d <= 4 ? lowCount++ : highCount++));
         const lowPct = ((lowCount / sample) * 100).toFixed(1);
         const highPct = ((highCount / sample) * 100).toFixed(1);
@@ -206,7 +308,7 @@ const getTickFromWsPayload = (data: any): TTick | null => {
 };
 
 // ============================================================================
-// Shared market tick-stream loader (used for both M1 and M2)
+// Shared market tick-stream loader
 // ============================================================================
 
 type TMarketStreamArgs = {
@@ -220,8 +322,6 @@ type TMarketStreamArgs = {
     ticksRef: { current: TTick[] };
 };
 
-/** Loads recent tick history for a symbol, then keeps it live via a WS subscription.
- *  Shared between the M1 and M2 streams so both markets behave identically. */
 const loadAndSubscribeMarket = async ({
     onLiveTick,
     pushLog,
@@ -336,10 +436,24 @@ const ProScanner = observer(() => {
     const [martingale, setMartingale] = useState(DEFAULT_MARTINGALE);
     const [runsInput, setRunsInput] = useState(DEFAULT_RUNS);
 
+    // Digit Pattern Strategy states for M1
+    const [m1Pattern, setM1Pattern] = useState(DEFAULT_PATTERN);
+    const [m1DigitCondition, setM1DigitCondition] = useState('==');
+    const [m1DigitCompare, setM1DigitCompare] = useState(DEFAULT_DIGIT_COMPARE);
+    const [m1DigitWindow, setM1DigitWindow] = useState(DEFAULT_DIGIT_WINDOW);
+    const [m1StrategyMode, setM1StrategyMode] = useState<'pattern' | 'digit' | 'both'>('pattern');
+
     // Config — Market 2 (dual-market recovery)
     const [m2Enabled, setM2Enabled] = useState(false);
     const [symbol2, setSymbol2] = useState('R_25');
     const [strategyId2, setStrategyId2] = useState<TStrategyId>('even_odd');
+
+    // Digit Pattern Strategy states for M2
+    const [m2Pattern, setM2Pattern] = useState(DEFAULT_PATTERN);
+    const [m2DigitCondition, setM2DigitCondition] = useState('==');
+    const [m2DigitCompare, setM2DigitCompare] = useState(DEFAULT_DIGIT_COMPARE);
+    const [m2DigitWindow, setM2DigitWindow] = useState(DEFAULT_DIGIT_WINDOW);
+    const [m2StrategyMode, setM2StrategyMode] = useState<'pattern' | 'digit' | 'both'>('pattern');
 
     // Config — scan-all-markets
     const [scanMode, setScanMode] = useState<'manual' | 'scan_all'>('manual');
@@ -382,6 +496,20 @@ const ProScanner = observer(() => {
     const requestVersionRef = useRef(0);
     const requestVersion2Ref = useRef(0);
 
+    // Digit Pattern refs for M1
+    const m1PatternRef = useRef(m1Pattern);
+    const m1DigitConditionRef = useRef(m1DigitCondition);
+    const m1DigitCompareRef = useRef(m1DigitCompare);
+    const m1DigitWindowRef = useRef(m1DigitWindow);
+    const m1StrategyModeRef = useRef(m1StrategyMode);
+
+    // Digit Pattern refs for M2
+    const m2PatternRef = useRef(m2Pattern);
+    const m2DigitConditionRef = useRef(m2DigitCondition);
+    const m2DigitCompareRef = useRef(m2DigitCompare);
+    const m2DigitWindowRef = useRef(m2DigitWindow);
+    const m2StrategyModeRef = useRef(m2StrategyMode);
+
     const baseStakeRef = useRef(0);
     const currentStakeRef = useRef(0);
     const martingaleRef = useRef(DEFAULT_MARTINGALE);
@@ -406,16 +534,45 @@ const ProScanner = observer(() => {
     const digits = useMemo(() => digitsFromTicks(ticks, symbol), [ticks, symbol]);
     const digitStats = useMemo(() => digitStatsFrom(digits), [digits]);
     const hasEnoughSamples = digits.length >= MIN_SAMPLE_FOR_SIGNAL;
-    const preview = useMemo(() => (hasEnoughSamples ? buildSignal(strategyId, ticks, symbol) : null), [hasEnoughSamples, strategyId, ticks, symbol]);
+
+    // Clean patterns
+    const cleanM1Pattern = m1Pattern.toUpperCase().replace(/[^EO]/g, '');
+    const cleanM2Pattern = m2Pattern.toUpperCase().replace(/[^EO]/g, '');
+
+    // Build preview with digit pattern params for M1
+    const preview = useMemo(() => {
+        if (!hasEnoughSamples) return null;
+        const isDigitPattern = strategyId === 'digit_pattern';
+        return buildSignal(
+            strategyId, 
+            ticks, 
+            symbol,
+            isDigitPattern ? cleanM1Pattern : undefined,
+            isDigitPattern ? m1DigitCondition : undefined,
+            isDigitPattern ? m1DigitCompare : undefined,
+            isDigitPattern ? m1DigitWindow : undefined
+        );
+    }, [hasEnoughSamples, strategyId, ticks, symbol, cleanM1Pattern, m1DigitCondition, m1DigitCompare, m1DigitWindow]);
 
     const latestTick2 = ticks2[ticks2.length - 1];
     const latestDigit2 = latestTick2 ? getLastDigitFromQuote(latestTick2.quote, symbol2) : null;
     const digits2 = useMemo(() => digitsFromTicks(ticks2, symbol2), [ticks2, symbol2]);
     const hasEnoughSamples2 = digits2.length >= MIN_SAMPLE_FOR_SIGNAL;
-    const preview2 = useMemo(
-        () => (m2Enabled && hasEnoughSamples2 ? buildSignal(strategyId2, ticks2, symbol2) : null),
-        [m2Enabled, hasEnoughSamples2, strategyId2, ticks2, symbol2]
-    );
+
+    // Build preview for M2
+    const preview2 = useMemo(() => {
+        if (!m2Enabled || !hasEnoughSamples2) return null;
+        const isDigitPattern = strategyId2 === 'digit_pattern';
+        return buildSignal(
+            strategyId2, 
+            ticks2, 
+            symbol2,
+            isDigitPattern ? cleanM2Pattern : undefined,
+            isDigitPattern ? m2DigitCondition : undefined,
+            isDigitPattern ? m2DigitCompare : undefined,
+            isDigitPattern ? m2DigitWindow : undefined
+        );
+    }, [m2Enabled, hasEnoughSamples2, strategyId2, ticks2, symbol2, cleanM2Pattern, m2DigitCondition, m2DigitCompare, m2DigitWindow]);
 
     const isCoveredByMobileRunPanel = !isDesktop && run_panel.is_drawer_open;
 
@@ -423,7 +580,7 @@ const ProScanner = observer(() => {
         setLog(previous => [...previous.slice(-(MAX_LOG_ENTRIES - 1)), { at: Date.now(), kind, text }]);
     }, []);
 
-    // Keep refs in sync with state used inside the async loop.
+    // Keep refs in sync with state
     useEffect(() => {
         ticksRef.current = ticks;
     }, [ticks]);
@@ -451,6 +608,39 @@ const ProScanner = observer(() => {
     useEffect(() => {
         activeMarketSlotRef.current = activeMarketSlot;
     }, [activeMarketSlot]);
+
+    // Digit Pattern refs sync
+    useEffect(() => {
+        m1PatternRef.current = m1Pattern;
+    }, [m1Pattern]);
+    useEffect(() => {
+        m1DigitConditionRef.current = m1DigitCondition;
+    }, [m1DigitCondition]);
+    useEffect(() => {
+        m1DigitCompareRef.current = m1DigitCompare;
+    }, [m1DigitCompare]);
+    useEffect(() => {
+        m1DigitWindowRef.current = m1DigitWindow;
+    }, [m1DigitWindow]);
+    useEffect(() => {
+        m1StrategyModeRef.current = m1StrategyMode;
+    }, [m1StrategyMode]);
+
+    useEffect(() => {
+        m2PatternRef.current = m2Pattern;
+    }, [m2Pattern]);
+    useEffect(() => {
+        m2DigitConditionRef.current = m2DigitCondition;
+    }, [m2DigitCondition]);
+    useEffect(() => {
+        m2DigitCompareRef.current = m2DigitCompare;
+    }, [m2DigitCompare]);
+    useEffect(() => {
+        m2DigitWindowRef.current = m2DigitWindow;
+    }, [m2DigitWindow]);
+    useEffect(() => {
+        m2StrategyModeRef.current = m2StrategyMode;
+    }, [m2StrategyMode]);
 
     // --- Ticks stream (M1) ---------------------------------------------------
 
@@ -494,7 +684,7 @@ const ProScanner = observer(() => {
         };
     }, [loadMarketData, unsubscribe]);
 
-    // --- Ticks stream (M2 — only while dual-market recovery is enabled) -----
+    // --- Ticks stream (M2) ---------------------------------------------------
 
     const unsubscribe2 = useCallback(() => {
         try {
@@ -569,7 +759,16 @@ const ProScanner = observer(() => {
                             .filter((tick): tick is TTick => Number.isFinite(tick.quote));
                         if (scanTicks.length < SCAN_MIN_SAMPLE) return null;
 
-                        const { confidence, signal } = buildSignal(strategyRef.current, scanTicks, market.symbol);
+                        const isDigitPattern = strategyRef.current === 'digit_pattern';
+                        const { confidence, signal } = buildSignal(
+                            strategyRef.current, 
+                            scanTicks, 
+                            market.symbol,
+                            isDigitPattern ? m1PatternRef.current : undefined,
+                            isDigitPattern ? m1DigitConditionRef.current : undefined,
+                            isDigitPattern ? m1DigitCompareRef.current : undefined,
+                            isDigitPattern ? m1DigitWindowRef.current : undefined
+                        );
                         return { confidence, label: market.label, signal, symbol: market.symbol } as TScanResult;
                     } catch {
                         return null;
@@ -577,7 +776,7 @@ const ProScanner = observer(() => {
                 })
             );
 
-            if (scanRequestRef.current !== scanId) return; // a newer scan superseded this one
+            if (scanRequestRef.current !== scanId) return;
 
             const ranked = results
                 .filter((row): row is TScanResult => row !== null)
@@ -610,7 +809,7 @@ const ProScanner = observer(() => {
         return () => clearInterval(intervalId);
     }, [isRunning, runMarketScan, scanMode, showScanner]);
 
-    // --- Store wiring (run panel / stop handler) -----------------------------
+    // --- Store wiring --------------------------------------------------------
 
     const stopTrading = useCallback(() => {
         shouldStopRef.current = true;
@@ -707,7 +906,7 @@ const ProScanner = observer(() => {
     const executeTradeFromTick = useCallback(
         async (context: TMarketContext) => {
             if (!tradeActiveRef.current || tradeInFlightRef.current || shouldStopRef.current) return;
-            if (context.slot !== activeMarketSlotRef.current) return; // stale tick from the inactive market
+            if (context.slot !== activeMarketSlotRef.current) return;
             if (context.ticks.length < MIN_SAMPLE_FOR_SIGNAL) return;
 
             if (sessionPnlRef.current <= -stopLossRef.current) {
@@ -726,16 +925,45 @@ const ProScanner = observer(() => {
                 return;
             }
 
-            // Same-market primary/recovery signal switching only applies when dual-market
-            // recovery (M2) is off — once M2 is enabled, losses are recovered by switching
-            // markets instead of switching signals on the same market.
             const usesSameMarketRecovery =
                 !m2EnabledRef.current && context.strategyId === 'over_under' && primarySignalRef.current && recoverySignalRef.current;
-            const currentSignal = usesSameMarketRecovery
-                ? isRecoveryRef.current
+            
+            let currentSignal: TSignal;
+            
+            if (usesSameMarketRecovery) {
+                currentSignal = isRecoveryRef.current
                     ? (recoverySignalRef.current as TSignal)
-                    : (primarySignalRef.current as TSignal)
-                : buildSignal(context.strategyId, context.ticks, context.symbol).signal;
+                    : (primarySignalRef.current as TSignal);
+            } else {
+                const isDigitPattern = context.strategyId === 'digit_pattern';
+                let pattern = '';
+                let condition = '==';
+                let compare = '5';
+                let window = '3';
+                
+                if (context.slot === 'm1') {
+                    pattern = m1PatternRef.current;
+                    condition = m1DigitConditionRef.current;
+                    compare = m1DigitCompareRef.current;
+                    window = m1DigitWindowRef.current;
+                } else {
+                    pattern = m2PatternRef.current;
+                    condition = m2DigitConditionRef.current;
+                    compare = m2DigitCompareRef.current;
+                    window = m2DigitWindowRef.current;
+                }
+                
+                const result = buildSignal(
+                    context.strategyId, 
+                    context.ticks, 
+                    context.symbol,
+                    isDigitPattern ? pattern : undefined,
+                    isDigitPattern ? condition : undefined,
+                    isDigitPattern ? compare : undefined,
+                    isDigitPattern ? window : undefined
+                );
+                currentSignal = result.signal;
+            }
 
             tradeInFlightRef.current = true;
             const stake = currentStakeRef.current;
@@ -885,7 +1113,6 @@ const ProScanner = observer(() => {
         tradeInFlightRef.current = false;
         activeMarketSlotRef.current = 'm1';
 
-        // Same-market primary/recovery signal switching is only used when M2 is off.
         const { signal } = preview;
         if (!m2Enabled && strategyId === 'over_under' && signal.recoveryContractType && signal.recoveryLabel) {
             primarySignalRef.current = { barrier: signal.barrier, contractType: signal.contractType, label: signal.label };
@@ -907,9 +1134,17 @@ const ProScanner = observer(() => {
         setCurrentStakeDisplay(stake);
         setIsRunning(true);
         setLog([]);
-        pushLog('info', `Started ${STRATEGIES.find(s => s.id === strategyId)?.label} on ${selectedMarket.label} (M1).`);
+        
+        const strategyLabel = STRATEGIES.find(s => s.id === strategyId)?.label || strategyId;
+        pushLog('info', `Started ${strategyLabel} on ${selectedMarket.label} (M1).`);
+        
+        if (strategyId === 'digit_pattern') {
+            pushLog('info', `Digit Pattern: "${cleanM1Pattern}" | Condition: ${m1DigitCondition} ${m1DigitCompare} | Window: ${m1DigitWindow}`);
+        }
+        
         if (m2Enabled) {
-            pushLog('info', `Dual-market recovery active: losses on M1 switch to ${STRATEGIES.find(s => s.id === strategyId2)?.label} on ${selectedMarket2.label} (M2).`);
+            const strategy2Label = STRATEGIES.find(s => s.id === strategyId2)?.label || strategyId2;
+            pushLog('info', `Dual-market recovery active: losses on M1 switch to ${strategy2Label} on ${selectedMarket2.label} (M2).`);
         }
         pushLog('info', `Stake ${stake} ${currency} · Martingale x${martingale} · SL ${stopLoss} · TP ${takeProfit} · Runs ${runs}`);
 
@@ -945,6 +1180,10 @@ const ProScanner = observer(() => {
         strategyId2,
         symbol,
         takeProfitInput,
+        cleanM1Pattern,
+        m1DigitCondition,
+        m1DigitCompare,
+        m1DigitWindow,
     ]);
 
     const handleMarketChange = (nextSymbol: string) => {
@@ -1059,6 +1298,100 @@ const ProScanner = observer(() => {
                             </select>
                         </label>
 
+                        {/* Digit Pattern Strategy Controls for M1 */}
+                        {strategyId === 'digit_pattern' && (
+                            <div className='scanner2-digit-pattern'>
+                                <div className='scanner2-digit-pattern__mode'>
+                                    <span>Strategy Mode</span>
+                                    <div className='scanner2-digit-pattern__mode-buttons'>
+                                        <button
+                                            type='button'
+                                            className={classNames('scanner2-digit-pattern__mode-btn', { active: m1StrategyMode === 'pattern' })}
+                                            onClick={() => setM1StrategyMode('pattern')}
+                                            disabled={isRunning}
+                                        >
+                                            Pattern
+                                        </button>
+                                        <button
+                                            type='button'
+                                            className={classNames('scanner2-digit-pattern__mode-btn', { active: m1StrategyMode === 'digit' })}
+                                            onClick={() => setM1StrategyMode('digit')}
+                                            disabled={isRunning}
+                                        >
+                                            Digit
+                                        </button>
+                                        <button
+                                            type='button'
+                                            className={classNames('scanner2-digit-pattern__mode-btn', { active: m1StrategyMode === 'both' })}
+                                            onClick={() => setM1StrategyMode('both')}
+                                            disabled={isRunning}
+                                        >
+                                            Both
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {(m1StrategyMode === 'pattern' || m1StrategyMode === 'both') && (
+                                    <div className='scanner2-digit-pattern__field'>
+                                        <label>Pattern (E=Even, O=Odd)</label>
+                                        <input
+                                            type='text'
+                                            placeholder='e.g. EEOE'
+                                            value={m1Pattern}
+                                            onChange={e => setM1Pattern(e.target.value.toUpperCase().replace(/[^EO]/g, ''))}
+                                            disabled={isRunning}
+                                            className='scanner2-digit-pattern__input'
+                                        />
+                                        <span className='scanner2-digit-pattern__hint'>
+                                            {cleanM1Pattern.length >= 2 ? `✅ Pattern: ${cleanM1Pattern}` : '⚠️ Need at least 2 characters'}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {(m1StrategyMode === 'digit' || m1StrategyMode === 'both') && (
+                                    <div className='scanner2-digit-pattern__row'>
+                                        <div className='scanner2-digit-pattern__field'>
+                                            <label>Window</label>
+                                            <input
+                                                type='number'
+                                                min='1'
+                                                max='50'
+                                                value={m1DigitWindow}
+                                                onChange={e => setM1DigitWindow(e.target.value)}
+                                                disabled={isRunning}
+                                                className='scanner2-digit-pattern__input'
+                                            />
+                                        </div>
+                                        <div className='scanner2-digit-pattern__field'>
+                                            <label>Condition</label>
+                                            <select
+                                                value={m1DigitCondition}
+                                                onChange={e => setM1DigitCondition(e.target.value)}
+                                                disabled={isRunning}
+                                                className='scanner2-digit-pattern__select'
+                                            >
+                                                {DIGIT_CONDITIONS.map(c => (
+                                                    <option key={c} value={c}>{c}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className='scanner2-digit-pattern__field'>
+                                            <label>Digit</label>
+                                            <input
+                                                type='number'
+                                                min='0'
+                                                max='9'
+                                                value={m1DigitCompare}
+                                                onChange={e => setM1DigitCompare(e.target.value)}
+                                                disabled={isRunning}
+                                                className='scanner2-digit-pattern__input'
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         <div className='scanner2-field-row'>
                             <label className='scanner2-field'>
                                 <span>Stake</span>
@@ -1135,6 +1468,100 @@ const ProScanner = observer(() => {
                                         ))}
                                     </select>
                                 </label>
+
+                                {/* Digit Pattern Strategy Controls for M2 */}
+                                {strategyId2 === 'digit_pattern' && (
+                                    <div className='scanner2-digit-pattern'>
+                                        <div className='scanner2-digit-pattern__mode'>
+                                            <span>Strategy Mode</span>
+                                            <div className='scanner2-digit-pattern__mode-buttons'>
+                                                <button
+                                                    type='button'
+                                                    className={classNames('scanner2-digit-pattern__mode-btn', { active: m2StrategyMode === 'pattern' })}
+                                                    onClick={() => setM2StrategyMode('pattern')}
+                                                    disabled={isRunning}
+                                                >
+                                                    Pattern
+                                                </button>
+                                                <button
+                                                    type='button'
+                                                    className={classNames('scanner2-digit-pattern__mode-btn', { active: m2StrategyMode === 'digit' })}
+                                                    onClick={() => setM2StrategyMode('digit')}
+                                                    disabled={isRunning}
+                                                >
+                                                    Digit
+                                                </button>
+                                                <button
+                                                    type='button'
+                                                    className={classNames('scanner2-digit-pattern__mode-btn', { active: m2StrategyMode === 'both' })}
+                                                    onClick={() => setM2StrategyMode('both')}
+                                                    disabled={isRunning}
+                                                >
+                                                    Both
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {(m2StrategyMode === 'pattern' || m2StrategyMode === 'both') && (
+                                            <div className='scanner2-digit-pattern__field'>
+                                                <label>Pattern (E=Even, O=Odd)</label>
+                                                <input
+                                                    type='text'
+                                                    placeholder='e.g. EEOE'
+                                                    value={m2Pattern}
+                                                    onChange={e => setM2Pattern(e.target.value.toUpperCase().replace(/[^EO]/g, ''))}
+                                                    disabled={isRunning}
+                                                    className='scanner2-digit-pattern__input'
+                                                />
+                                                <span className='scanner2-digit-pattern__hint'>
+                                                    {cleanM2Pattern.length >= 2 ? `✅ Pattern: ${cleanM2Pattern}` : '⚠️ Need at least 2 characters'}
+                                                </span>
+                                            </div>
+                                        )}
+
+                                        {(m2StrategyMode === 'digit' || m2StrategyMode === 'both') && (
+                                            <div className='scanner2-digit-pattern__row'>
+                                                <div className='scanner2-digit-pattern__field'>
+                                                    <label>Window</label>
+                                                    <input
+                                                        type='number'
+                                                        min='1'
+                                                        max='50'
+                                                        value={m2DigitWindow}
+                                                        onChange={e => setM2DigitWindow(e.target.value)}
+                                                        disabled={isRunning}
+                                                        className='scanner2-digit-pattern__input'
+                                                    />
+                                                </div>
+                                                <div className='scanner2-digit-pattern__field'>
+                                                    <label>Condition</label>
+                                                    <select
+                                                        value={m2DigitCondition}
+                                                        onChange={e => setM2DigitCondition(e.target.value)}
+                                                        disabled={isRunning}
+                                                        className='scanner2-digit-pattern__select'
+                                                    >
+                                                        {DIGIT_CONDITIONS.map(c => (
+                                                            <option key={c} value={c}>{c}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div className='scanner2-digit-pattern__field'>
+                                                    <label>Digit</label>
+                                                    <input
+                                                        type='number'
+                                                        min='0'
+                                                        max='9'
+                                                        value={m2DigitCompare}
+                                                        onChange={e => setM2DigitCompare(e.target.value)}
+                                                        disabled={isRunning}
+                                                        className='scanner2-digit-pattern__input'
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </>
                         )}
 
