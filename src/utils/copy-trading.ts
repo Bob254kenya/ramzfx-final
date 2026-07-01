@@ -1,4 +1,5 @@
 import { api_base } from '@/external/bot-skeleton';
+import { getDomainConfig } from '@/components/shared/utils/config/config';
 
 export type TCopierSettings = {
     max_trade_stake?: number;
@@ -26,6 +27,14 @@ export type TCopyTradingStats = {
     yearly_profitable_trades?: Record<string, number>;
 };
 
+export type TTokenAccountInfo = {
+    balance: number;
+    currency: string;
+    email?: string;
+    is_virtual: boolean;
+    loginid: string;
+};
+
 const throwIfError = (response: any, fallback_message: string) => {
     if (response?.error) {
         throw new Error(response.error.message || fallback_message);
@@ -39,6 +48,67 @@ const ensureAuthorized = async () => {
     if (!api_base.is_authorized) {
         throw new Error('Please log in to your Deriv account before using Copy Trading.');
     }
+};
+
+/**
+ * Verifies an arbitrary API token and returns the balance/currency/loginid behind it,
+ * WITHOUT touching the app's own authorized trading session. Opens a short-lived,
+ * isolated WebSocket connection that is closed as soon as the answer arrives.
+ */
+export const fetchAccountInfoForToken = (token: string): Promise<TTokenAccountInfo> => {
+    return new Promise((resolve, reject) => {
+        const trimmed_token = token.trim();
+        if (!trimmed_token) {
+            reject(new Error('Enter an API token first.'));
+            return;
+        }
+
+        const { appId } = getDomainConfig();
+        const socket = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${encodeURIComponent(appId)}`);
+
+        const timeout = setTimeout(() => {
+            socket.close();
+            reject(new Error('Timed out verifying this token. Please try again.'));
+        }, 10000);
+
+        socket.onopen = () => {
+            socket.send(JSON.stringify({ authorize: trimmed_token }));
+        };
+
+        socket.onmessage = event => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.msg_type !== 'authorize') return;
+
+                clearTimeout(timeout);
+                socket.close();
+
+                if (data.error) {
+                    reject(new Error(data.error.message || 'This API token is invalid or has expired.'));
+                    return;
+                }
+
+                const authorize = data.authorize ?? {};
+                resolve({
+                    balance: Number(authorize.balance ?? 0),
+                    currency: authorize.currency ?? 'USD',
+                    email: authorize.email,
+                    is_virtual: Boolean(authorize.is_virtual),
+                    loginid: authorize.loginid ?? '',
+                });
+            } catch {
+                clearTimeout(timeout);
+                socket.close();
+                reject(new Error('Unexpected response while verifying this token.'));
+            }
+        };
+
+        socket.onerror = () => {
+            clearTimeout(timeout);
+            socket.close();
+            reject(new Error('Could not connect to Deriv to verify this token.'));
+        };
+    });
 };
 
 /**
