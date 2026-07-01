@@ -349,7 +349,7 @@
 
     <div id="aw-panel" role="dialog" aria-label="Ask a question">
       <div id="aw-header">
-        <div class="aw-title">Ask ${PLATFORM_NAME} <span class="aw-tag">BEGINNER MODE</span></div>
+        <div class="aw-title">Ask Robert Nyaundi <span class="aw-tag">BEGINNER MODE</span></div>
         <button id="aw-close" aria-label="Close">&times;</button>
       </div>
       <div id="aw-ticker"><span>WHAT'S A LIMIT ORDER? &nbsp;&bull;&nbsp; HOW DO FEES WORK? &nbsp;&bull;&nbsp; WHAT DOES "SPREAD" MEAN? &nbsp;&bull;&nbsp; HOW DO I READ A CANDLESTICK? &nbsp;&bull;&nbsp; WHAT IS MARGIN?</span></div>
