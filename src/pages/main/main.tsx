@@ -741,7 +741,7 @@ const AppWrapper = observer(() => {
                                 label={
                                     <>
                                         <LabelPairedChartTrendUpCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
-                                        <Localize i18n_default_text='Aviator Accumulator' />
+                                        <Localize i18n_default_text='Accumulators' />
                                     </>
                                 }
                                 id='id-aviator-accumulator'
