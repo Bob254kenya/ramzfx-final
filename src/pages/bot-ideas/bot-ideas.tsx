@@ -1,611 +1,176 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { DBOT_TABS } from '@/constants/bot-contents';
-import { load, save_types } from '@/external/bot-skeleton';
-import { useStore } from '@/hooks/useStore';
-import { API_BASE } from '@/utils/api-base';
-import BotPitchForm from './components/submit-form';
-import { TBotIdea } from './types';
+import { LESSONS } from './course-content';
 import './bot-ideas.scss';
 
-const MIN_STRATEGY_LENGTH = 120;
-const MIN_RUNS_FOR_RATING = 3;
-const DEVELOPER_DISPLAY_NAME = 'Mr Duke';
-
-const tradingAdvice = [
-  "📈 The trend is your friend until the bend at the end",
-  "💡 Buy low, sell high - it's simple but not easy",
-  "🔥 Don't catch a falling knife - wait for confirmation",
-  "📊 Cut your losses short and let your profits run",
-  "⚡ Volatility is opportunity in disguise",
-  "🎯 Set your stop-loss and take-profit before entering",
-  "💎 Patience is the most valuable trading skill",
-  "🌊 Trade with the trend, not against it",
-  "📉 Fear and greed drive the market - master both",
-  "🚀 Diversification is your only free lunch",
-  "⏰ Time in the market beats timing the market",
-  "💪 Risk management > profit generation",
-  "📈 Never add to a losing position",
-  "🎲 Know your risk tolerance before you trade",
-  "🌟 The best trade is sometimes no trade",
-  "📊 Price action speaks louder than indicators",
-  "💡 Success is a poor teacher - learn from losses too",
-  "🔥 Don't fall in love with your positions",
-  "💎 Volatility creates wealth for the patient",
-  "📉 Market sentiment drives price more than fundamentals",
-  "⚡ Quick profits often lead to quick losses",
-  "🎯 Trade what you see, not what you think",
-  "🌟 Discipline beats intelligence every time",
-  "📈 The market rewards consistency, not luck",
-  "💡 Your worst trade is often your best teacher",
-  "📊 Always have an exit plan before entry",
-  "💪 Leverage is a double-edged sword",
-  "🔥 News trading is risky - wait for the dust to settle",
-  "🎲 Even a broken clock is right twice a day",
-  "📉 Greed expands and contracts in cycles",
-  "⚡ The first loss is your best loss",
-  "💎 Keep a trading journal - learn from every trade",
-  "📈 Buy the rumor, sell the news",
-  "🌟 Patience pays off in the long run",
-  "🔥 Don't overtrade - quality over quantity",
-  "💡 Technical analysis is a self-fulfilling prophecy",
-  "📊 The market is always right",
-  "💪 Protect your capital above all else",
-  "🎯 Have a strategy and stick to it",
-  "📉 Fear of missing out is expensive",
-  "⚡ Low volatility often precedes big moves",
-  "💎 Confidence comes from preparation, not ego",
-  "📈 The best trade is the one you don't regret",
-  "🌟 Successful trading is boring trading",
-  "🔥 Don't chase the market - let it come to you",
-  "💡 Know when to hold and when to fold",
-  "📊 Volume confirms price action",
-  "💪 Trading is 20% strategy and 80% psychology",
-  "🎲 Luck favors the prepared mind",
-  "📉 The market always gives you another chance",
-];
-
-const getRandomAdvice = () => {
-  const randomIndex = Math.floor(Math.random() * tradingAdvice.length);
-  return tradingAdvice[randomIndex];
-};
-
-const AdviceRotator = () => {
-  const [advice, setAdvice] = useState(getRandomAdvice());
-  const [isVisible, setIsVisible] = useState(true);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setIsVisible(false);
-      setTimeout(() => {
-        setAdvice(getRandomAdvice());
-        setIsVisible(true);
-      }, 500);
-    }, 8000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  return (
-    <div className={`advice-rotator ${isVisible ? 'advice-rotator--visible' : 'advice-rotator--hidden'}`}>
-      <span className="advice-rotator__text">{advice}</span>
-    </div>
-  );
-};
-
-const formatDate = (iso: string) => {
-    try {
-        return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-    } catch {
-        return iso;
-    }
-};
-
-const formatMoney = (value: number | string | null | undefined) => {
-    const n = Number(value || 0);
-    const sign = n < 0 ? '-' : '';
-    return `${sign}$${Math.abs(n).toFixed(2)}`;
-};
-
-const computeStars = (profits: number, losses: number) => {
-    const total = (profits || 0) + (losses || 0);
-    if (total < MIN_RUNS_FOR_RATING) return 0;
-    const rate = profits / total;
-    if (rate >= 0.8) return 5;
-    if (rate >= 0.6) return 4;
-    if (rate >= 0.4) return 3;
-    if (rate >= 0.2) return 2;
-    return 1;
-};
-
-const StarRating = ({ profits, losses }: { profits: number; losses: number }) => {
-    const stars = computeStars(profits, losses);
-    if (stars === 0) {
-        return <span className='bi-idea-card__rating bi-idea-card__rating--new'>New – not enough runs</span>;
-    }
-    return (
-        <span className='bi-idea-card__rating' title={`${stars} out of 5`}>
-            {Array.from({ length: 5 }, (_, i) => (
-                <span
-                    key={i}
-                    className={`bi-idea-card__star${i < stars ? ' bi-idea-card__star--filled' : ''}`}
-                    aria-hidden='true'
-                >
-                    ★
-                </span>
-            ))}
-            <span className='bi-idea-card__rating-value'>{stars}/5</span>
-        </span>
-    );
-};
+const TOTAL_LESSONS = LESSONS.length;
 
 const BotIdeas = observer(() => {
-    const { client, dashboard, toolbar } = useStore();
-    const { setActiveTab } = dashboard;
-    const [ideas, setIdeas] = useState<TBotIdea[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [editingId, setEditingId] = useState<number | null>(null);
-    const [editName, setEditName] = useState('');
-    const [editStrategy, setEditStrategy] = useState('');
-    const [savingId, setSavingId] = useState<number | null>(null);
-    const [deletingId, setDeletingId] = useState<number | null>(null);
-    const [actionError, setActionError] = useState<string | null>(null);
-    const [loadingId, setLoadingId] = useState<number | null>(null);
-    const [loadError, setLoadError] = useState<string | null>(null);
-    const [attachingId, setAttachingId] = useState<number | null>(null);
-    const [attachError, setAttachError] = useState<string | null>(null);
-    const [detachingId, setDetachingId] = useState<number | null>(null);
+    const [activeIndex, setActiveIndex] = useState(0);
+    const [isAnimating, setIsAnimating] = useState(false);
+    const [completed, setCompleted] = useState<Set<number>>(new Set([0]));
+    const [showToc, setShowToc] = useState(false);
 
-    const fetchIdeas = useCallback(async (attempt = 1, silent = false) => {
-        if (attempt === 1 && !silent) {
-            setLoading(true);
-            setError(null);
-        }
-        try {
-            const res = await fetch(`${API_BASE}/bot-ideas`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data: TBotIdea[] = await res.json();
-            setIdeas(data);
-            if (!silent) setLoading(false);
-        } catch {
-            if (attempt < 3) {
-                setTimeout(() => fetchIdeas(attempt + 1, silent), 1000);
-                return;
-            }
-            if (!silent) {
-                setError('Could not load bot ideas. Please try again later.');
-                setLoading(false);
-            }
-        }
-    }, []);
+    const lesson = LESSONS[activeIndex];
+    const progressPct = useMemo(
+        () => Math.round(((activeIndex + 1) / TOTAL_LESSONS) * 100),
+        [activeIndex]
+    );
 
     useEffect(() => {
-        fetchIdeas();
-        const interval = setInterval(() => fetchIdeas(1, true), 30_000);
-        return () => clearInterval(interval);
-    }, [fetchIdeas]);
+        setCompleted(prev => {
+            if (prev.has(activeIndex)) return prev;
+            const next = new Set(prev);
+            next.add(activeIndex);
+            return next;
+        });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, [activeIndex]);
 
-    const handleIdeaSubmitted = useCallback((idea: TBotIdea) => {
-        setIdeas(prev => [idea, ...prev]);
-    }, []);
-
-    const startEdit = (idea: TBotIdea) => {
-        setEditingId(idea.id);
-        setEditName(idea.bot_name);
-        setEditStrategy(idea.strategy_description);
-        setActionError(null);
-    };
-
-    const cancelEdit = () => {
-        setEditingId(null);
-        setEditName('');
-        setEditStrategy('');
-        setActionError(null);
-    };
-
-    const saveEdit = async (id: number) => {
-        if (editStrategy.trim().length <= MIN_STRATEGY_LENGTH) {
-            setActionError(`Strategy description must be more than ${MIN_STRATEGY_LENGTH} characters.`);
-            return;
-        }
-        setSavingId(id);
-        setActionError(null);
-        try {
-            const res = await fetch(`${API_BASE}/bot-ideas/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    bot_name: editName,
-                    strategy_description: editStrategy,
-                    submitted_by: client.loginid,
-                }),
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to update idea');
-            }
-            const updated: TBotIdea = await res.json();
-            setIdeas(prev => prev.map(i => (i.id === id ? updated : i)));
-            cancelEdit();
-        } catch (err: unknown) {
-            setActionError(err instanceof Error ? err.message : 'Failed to update idea');
-        } finally {
-            setSavingId(null);
-        }
-    };
-
-    const loadBotXml = async (idea: TBotIdea) => {
-        if (!idea.has_bot_xml || loadingId) return;
-        setLoadingId(idea.id);
-        setLoadError(null);
-        try {
-            const res = await fetch(`${API_BASE}/bot-ideas/${idea.id}/xml`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const { bot_xml } = (await res.json()) as { bot_xml: string };
-            const workspace = window.Blockly?.derivWorkspace;
-            if (!workspace) throw new Error('Workspace not ready');
-            await load({
-                block_string: bot_xml,
-                file_name: idea.bot_name,
-                workspace,
-                from: save_types.LOCAL,
-                drop_event: {},
-                strategy_id: null,
-                showIncompatibleStrategyDialog: false,
-            });
-            toolbar.setStrategyProtected(true);
-            setActiveTab(DBOT_TABS.BOT_BUILDER);
-        } catch (err: unknown) {
-            setLoadError(err instanceof Error ? err.message : 'Failed to load bot.');
-            setTimeout(() => setLoadError(null), 4000);
-        } finally {
-            setLoadingId(null);
-        }
-    };
-
-    const attachBot = async (idea: TBotIdea, file: File) => {
-        if (!client.is_logged_in || !client.loginid) {
-            setAttachError('Please log in to attach a bot.');
-            return;
-        }
-        if (!file.name.toLowerCase().endsWith('.xml')) {
-            setAttachError('Only .xml files are supported.');
-            return;
-        }
-        if (file.size > 1024 * 1024) {
-            setAttachError('File is larger than 1 MB.');
-            return;
-        }
-        setAttachingId(idea.id);
-        setAttachError(null);
-        try {
-            const bot_xml = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(String(reader.result || ''));
-                reader.onerror = () => reject(new Error('Could not read file'));
-                reader.readAsText(file);
-            });
-            const res = await fetch(`${API_BASE}/bot-ideas/${idea.id}/bot-xml`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    submitted_by: client.loginid,
-                    bot_xml,
-                    bot_xml_filename: file.name,
-                }),
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to attach bot');
-            }
-            const updated: TBotIdea = await res.json();
-            setIdeas(prev => prev.map(i => (i.id === idea.id ? updated : i)));
-        } catch (err: unknown) {
-            setAttachError(err instanceof Error ? err.message : 'Failed to attach bot');
-            setTimeout(() => setAttachError(null), 4000);
-        } finally {
-            setAttachingId(null);
-        }
-    };
-
-    const detachBot = async (id: number) => {
-        if (!window.confirm('Remove the attached bot from this idea?')) return;
-        setDetachingId(id);
-        setAttachError(null);
-        try {
-            const res = await fetch(`${API_BASE}/bot-ideas/${id}/bot-xml`, {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ submitted_by: client.loginid }),
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to remove bot');
-            }
-            const updated: TBotIdea = await res.json();
-            setIdeas(prev => prev.map(i => (i.id === id ? updated : i)));
-        } catch (err: unknown) {
-            setAttachError(err instanceof Error ? err.message : 'Failed to remove bot');
-            setTimeout(() => setAttachError(null), 4000);
-        } finally {
-            setDetachingId(null);
-        }
-    };
-
-    const deleteIdea = async (id: number) => {
-        if (!window.confirm('Delete this idea? This cannot be undone.')) return;
-        setDeletingId(id);
-        setActionError(null);
-        try {
-            const res = await fetch(`${API_BASE}/bot-ideas/${id}`, {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ submitted_by: client.loginid }),
-            });
-            if (!res.ok && res.status !== 204) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to delete idea');
-            }
-            setIdeas(prev => prev.filter(i => i.id !== id));
-        } catch (err: unknown) {
-            setActionError(err instanceof Error ? err.message : 'Failed to delete idea');
-        } finally {
-            setDeletingId(null);
-        }
+    const goTo = (index: number) => {
+        if (index < 0 || index >= TOTAL_LESSONS || index === activeIndex) return;
+        setIsAnimating(true);
+        setTimeout(() => {
+            setActiveIndex(index);
+            setIsAnimating(false);
+            setShowToc(false);
+        }, 220);
     };
 
     return (
         <div className='bot-ideas-page'>
             <div className='bot-ideas-page__inner'>
-                <div className='bot-ideas-page__header'>
-                    <h1 className='bot-ideas-page__title'>🤖 Community Bot Ideas</h1>
-                    <AdviceRotator />
-                </div>
+                <header className='bot-ideas-page__header'>
+                    <span className='course-badge'>🎓 Deriv Academy</span>
+                    <h1 className='bot-ideas-page__title'>Deriv Trading Mastery Course</h1>
+                    <p className='course-subtitle'>
+                        25 in-depth lessons covering everything you need to know about trading on Deriv —
+                        synthetic indices, forex, contract types, DBot automation, technical analysis,
+                        risk management and trading psychology.
+                    </p>
 
-                <BotPitchForm onIdeaSubmitted={handleIdeaSubmitted} />
-
-                <section className='bi-ideas-list'>
-                    <div className='bi-ideas-list__header'>
-                        <h3 className='bi-ideas-list__heading'>📊 Community Bot Ideas</h3>
-                        <div className='bi-ideas-list__filters'>
-                            <button className='bi-ideas-list__filter-btn bi-ideas-list__filter-btn--active'>
-                                🔥 All
-                            </button>
-                            <button className='bi-ideas-list__filter-btn'>⚡ Trending</button>
-                            <button className='bi-ideas-list__filter-btn'>⭐ Top Rated</button>
-                            <button className='bi-ideas-list__filter-btn'>✨ New</button>
+                    <div className='course-progress'>
+                        <div className='course-progress__bar'>
+                            <div
+                                className='course-progress__fill'
+                                style={{ width: `${progressPct}%` }}
+                            />
                         </div>
+                        <span className='course-progress__label'>
+                            Lesson {activeIndex + 1} of {TOTAL_LESSONS} · {progressPct}% explored
+                        </span>
                     </div>
 
-                    {loading && (
-                        <div className='bi-ideas-list__loading'>
-                            <div className='bi-ideas-list__loading-spinner'></div>
-                            <p className='bi-ideas-list__status'>Loading community strategies…</p>
+                    <button
+                        type='button'
+                        className='course-toc-toggle'
+                        onClick={() => setShowToc(prev => !prev)}
+                    >
+                        {showToc ? '✕ Close lesson list' : '📚 Browse all 25 lessons'}
+                    </button>
+                </header>
+
+                {showToc && (
+                    <nav className='course-toc'>
+                        {LESSONS.map((l, idx) => (
+                            <button
+                                type='button'
+                                key={l.id}
+                                className={[
+                                    'course-toc__item',
+                                    idx === activeIndex ? 'course-toc__item--active' : '',
+                                    completed.has(idx) ? 'course-toc__item--done' : '',
+                                ].join(' ').trim()}
+                                onClick={() => goTo(idx)}
+                            >
+                                <span className='course-toc__num'>{idx + 1}</span>
+                                <span className='course-toc__text'>
+                                    <span className='course-toc__title'>{l.title}</span>
+                                    <span className='course-toc__tag'>{l.tag}</span>
+                                </span>
+                                {completed.has(idx) && <span className='course-toc__check'>✓</span>}
+                            </button>
+                        ))}
+                    </nav>
+                )}
+
+                <section className='course-layout'>
+                    <aside className='course-rail'>
+                        {LESSONS.map((l, idx) => (
+                            <button
+                                type='button'
+                                key={l.id}
+                                title={l.title}
+                                className={[
+                                    'course-rail__dot',
+                                    idx === activeIndex ? 'course-rail__dot--active' : '',
+                                    completed.has(idx) ? 'course-rail__dot--done' : '',
+                                ].join(' ').trim()}
+                                onClick={() => goTo(idx)}
+                            >
+                                {idx + 1}
+                            </button>
+                        ))}
+                    </aside>
+
+                    <article className={`course-card ${isAnimating ? 'course-card--leaving' : 'course-card--entering'}`}>
+                        <div className='course-card__eyebrow'>
+                            <span className='course-card__tag'>{lesson.tag}</span>
+                            <span className='course-card__count'>Lesson {activeIndex + 1} / {TOTAL_LESSONS}</span>
                         </div>
-                    )}
-                    
-                    {error && (
-                        <div className='bi-ideas-list__error-block'>
-                            <p className='bi-ideas-list__status bi-ideas-list__status--error'>{error}</p>
-                            <button className='bi-ideas-list__retry-btn' onClick={() => fetchIdeas()}>
-                                🔄 Retry
+
+                        <h2 className='course-card__title'>{lesson.title}</h2>
+
+                        {lesson.intro && <p className='course-card__intro'>{lesson.intro}</p>}
+
+                        <div className='course-card__body'>
+                            {lesson.sections.map((sec, i) => (
+                                <div className='course-block' key={i} style={{ animationDelay: `${i * 70}ms` }}>
+                                    {sec.heading && <h3 className='course-block__heading'>{sec.heading}</h3>}
+                                    {sec.paragraphs?.map((p, pi) => (
+                                        <p className='course-block__paragraph' key={pi}>{p}</p>
+                                    ))}
+                                    {sec.bullets && (
+                                        <ul className='course-block__list'>
+                                            {sec.bullets.map((b, bi) => (
+                                                <li key={bi}>{b}</li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+
+                        {lesson.keyTakeaway && (
+                            <div className='course-callout'>
+                                <span className='course-callout__icon'>💡</span>
+                                <div>
+                                    <p className='course-callout__label'>Key takeaway</p>
+                                    <p className='course-callout__text'>{lesson.keyTakeaway}</p>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className='course-card__nav'>
+                            <button
+                                type='button'
+                                className='course-nav-btn course-nav-btn--prev'
+                                onClick={() => goTo(activeIndex - 1)}
+                                disabled={activeIndex === 0}
+                            >
+                                ← Previous
+                            </button>
+                            <span className='course-nav-page'>{activeIndex + 1} / {TOTAL_LESSONS}</span>
+                            <button
+                                type='button'
+                                className='course-nav-btn course-nav-btn--next'
+                                onClick={() => goTo(activeIndex + 1)}
+                                disabled={activeIndex === TOTAL_LESSONS - 1}
+                            >
+                                Next →
                             </button>
                         </div>
-                    )}
-                    
-                    {!loading && !error && ideas.length === 0 && (
-                        <div className='bi-ideas-list__empty'>
-                            <span className='bi-ideas-list__empty-icon'>🚀</span>
-                            <p className='bi-ideas-list__status'>No strategies yet. Be the first to share your bot idea!</p>
-                            <p className='bi-ideas-list__empty-sub'>Share your trading strategy with the community</p>
-                        </div>
-                    )}
-
-                    {ideas.length > 0 && (
-                        <div className='bi-ideas-list__grid'>
-                            {ideas.map(idea => {
-                                const isOwner = client.is_logged_in && client.loginid === idea.submitted_by;
-                                const isDeveloper = client.is_logged_in && !!idea.developed_by && client.loginid === idea.developed_by;
-                                const canManageBot = isOwner || isDeveloper;
-                                const isEditing = editingId === idea.id;
-                                const profitRate = idea.total_runs > 0 ? (idea.profits / idea.total_runs * 100) : 0;
-                                const isProfitable = profitRate >= 50;
-                                
-                                return (
-                                    <div key={idea.id} className={`bi-idea-card ${isProfitable ? 'bi-idea-card--profitable' : ''}`}>
-                                        {isEditing ? (
-                                            <div className='bi-idea-card__edit-mode'>
-                                                <div className='bi-idea-card__edit-header'>
-                                                    <span className='bi-idea-card__edit-icon'>✏️</span>
-                                                    <span className='bi-idea-card__edit-title'>Edit Strategy</span>
-                                                </div>
-                                                <input
-                                                    className='bi-idea-card__edit-input'
-                                                    value={editName}
-                                                    onChange={e => setEditName(e.target.value)}
-                                                    placeholder='Bot name'
-                                                />
-                                                <textarea
-                                                    className='bi-idea-card__edit-textarea'
-                                                    value={editStrategy}
-                                                    onChange={e => setEditStrategy(e.target.value)}
-                                                    rows={4}
-                                                    placeholder='Describe your strategy in detail...'
-                                                />
-                                                <div className='bi-idea-card__edit-footer'>
-                                                    <span className={`bi-idea-card__edit-hint ${editStrategy.trim().length >= MIN_STRATEGY_LENGTH ? 'bi-idea-card__edit-hint--valid' : ''}`}>
-                                                        {editStrategy.trim().length}/{MIN_STRATEGY_LENGTH} characters minimum
-                                                    </span>
-                                                    {actionError && (
-                                                        <p className='bi-idea-card__edit-error'>{actionError}</p>
-                                                    )}
-                                                </div>
-                                                <div className='bi-idea-card__actions'>
-                                                    <button
-                                                        className='bi-idea-card__action-btn bi-idea-card__action-btn--save'
-                                                        onClick={() => saveEdit(idea.id)}
-                                                        disabled={savingId === idea.id}
-                                                    >
-                                                        {savingId === idea.id ? 'Saving…' : '💾 Save'}
-                                                    </button>
-                                                    <button
-                                                        className='bi-idea-card__action-btn bi-idea-card__action-btn--cancel'
-                                                        onClick={cancelEdit}
-                                                        disabled={savingId === idea.id}
-                                                    >
-                                                        Cancel
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <>
-                                                <div className='bi-idea-card__badge'>
-                                                    {profitRate > 0 && (
-                                                        <span className={`bi-idea-card__badge-profit ${profitRate >= 70 ? 'bi-idea-card__badge-profit--high' : ''}`}>
-                                                            📈 {profitRate.toFixed(0)}% Win Rate
-                                                        </span>
-                                                    )}
-                                                    {idea.has_bot_xml && (
-                                                        <span className='bi-idea-card__badge-bot'>
-                                                            🤖 Bot Ready
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                
-                                                <div className='bi-idea-card__header'>
-                                                    <div className='bi-idea-card__name-wrapper'>
-                                                        <span className='bi-idea-card__name'>{idea.bot_name}</span>
-                                                        {isOwner && <span className='bi-idea-card__owner-tag'>👤 Owner</span>}
-                                                    </div>
-                                                    <span className='bi-idea-card__date'>
-                                                        📅 {formatDate(idea.submitted_at)}
-                                                    </span>
-                                                </div>
-                                                
-                                                <p className='bi-idea-card__submitter'>
-                                                    👤 Submitted by <strong>{idea.submitted_by}</strong>
-                                                </p>
-                                                
-                                                <p className='bi-idea-card__desc'>{idea.strategy_description}</p>
-                                                
-                                                <div className='bi-idea-card__stats'>
-                                                    <div className='bi-idea-card__stat bi-idea-card__stat--runs'>
-                                                        <span className='bi-idea-card__stat-icon'>🔄</span>
-                                                        <span className='bi-idea-card__stat-value'>{idea.total_runs ?? 0}</span>
-                                                        <span className='bi-idea-card__stat-label'>Runs</span>
-                                                    </div>
-                                                    <div className='bi-idea-card__stat bi-idea-card__stat--profit'>
-                                                        <span className='bi-idea-card__stat-icon'>✅</span>
-                                                        <span className='bi-idea-card__stat-value'>{idea.profits}</span>
-                                                        <span className='bi-idea-card__stat-label'>Wins</span>
-                                                        <span className='bi-idea-card__stat-amount'>+{formatMoney(idea.profit_amount)}</span>
-                                                    </div>
-                                                    <div className='bi-idea-card__stat bi-idea-card__stat--loss'>
-                                                        <span className='bi-idea-card__stat-icon'>❌</span>
-                                                        <span className='bi-idea-card__stat-value'>{idea.losses}</span>
-                                                        <span className='bi-idea-card__stat-label'>Losses</span>
-                                                        <span className='bi-idea-card__stat-amount'>-{formatMoney(idea.loss_amount)}</span>
-                                                    </div>
-                                                </div>
-
-                                                <div className='bi-idea-card__rating-wrapper'>
-                                                    <StarRating profits={idea.profits} losses={idea.losses} />
-                                                    {idea.total_runs > 0 && (
-                                                        <span className='bi-idea-card__runs-label'>
-                                                            {idea.total_runs} total runs
-                                                        </span>
-                                                    )}
-                                                </div>
-
-                                                {idea.has_bot_xml && (
-                                                    <div className='bi-idea-card__attachment-wrapper'>
-                                                        <p className='bi-idea-card__attachment'>
-                                                            📎 XML bot attached
-                                                            {idea.bot_xml_filename ? `: ${idea.bot_xml_filename}` : ''}
-                                                        </p>
-                                                        <p className='bi-idea-card__developer'>
-                                                            👨‍💻 Developed by <strong>{DEVELOPER_DISPLAY_NAME}</strong>
-                                                            {isDeveloper && !isOwner && (
-                                                                <span className='bi-idea-card__owner-tag'> (you)</span>
-                                                            )}
-                                                        </p>
-                                                    </div>
-                                                )}
-                                                
-                                                {!idea.has_bot_xml && client.is_logged_in && (
-                                                    <p className='bi-idea-card__attachment bi-idea-card__attachment--empty'>
-                                                        🛠 No bot attached yet — any developer can contribute one.
-                                                    </p>
-                                                )}
-                                                
-                                                {loadError && loadingId === null && (
-                                                    <p className='bi-idea-card__edit-error'>{loadError}</p>
-                                                )}
-                                                {attachError && (
-                                                    <p className='bi-idea-card__edit-error'>{attachError}</p>
-                                                )}
-                                                
-                                                <div className='bi-idea-card__actions'>
-                                                    {idea.has_bot_xml && (
-                                                        <button
-                                                            className='bi-idea-card__action-btn bi-idea-card__action-btn--load'
-                                                            onClick={() => loadBotXml(idea)}
-                                                            disabled={loadingId === idea.id}
-                                                        >
-                                                            {loadingId === idea.id ? 'Loading…' : '▶ Load bot'}
-                                                        </button>
-                                                    )}
-                                                    {!idea.has_bot_xml && client.is_logged_in && (
-                                                        <label className='bi-idea-card__action-btn bi-idea-card__action-btn--attach'>
-                                                            {attachingId === idea.id ? 'Attaching…' : '📎 Attach bot'}
-                                                            <input
-                                                                type='file'
-                                                                accept='.xml,application/xml,text/xml'
-                                                                hidden
-                                                                disabled={attachingId === idea.id}
-                                                                onChange={e => {
-                                                                    const file = e.target.files?.[0];
-                                                                    if (file) attachBot(idea, file);
-                                                                    e.target.value = '';
-                                                                }}
-                                                            />
-                                                        </label>
-                                                    )}
-                                                    {idea.has_bot_xml && canManageBot && (
-                                                        <button
-                                                            className='bi-idea-card__action-btn bi-idea-card__action-btn--detach'
-                                                            onClick={() => detachBot(idea.id)}
-                                                            disabled={detachingId === idea.id}
-                                                        >
-                                                            {detachingId === idea.id ? 'Removing…' : 'Remove bot'}
-                                                        </button>
-                                                    )}
-                                                    {isOwner && (
-                                                        <>
-                                                            <button
-                                                                className='bi-idea-card__action-btn bi-idea-card__action-btn--edit'
-                                                                onClick={() => startEdit(idea)}
-                                                            >
-                                                                ✏️ Edit
-                                                            </button>
-                                                            <button
-                                                                className='bi-idea-card__action-btn bi-idea-card__action-btn--delete'
-                                                                onClick={() => deleteIdea(idea.id)}
-                                                                disabled={deletingId === idea.id}
-                                                            >
-                                                                {deletingId === idea.id ? 'Deleting…' : '🗑 Delete'}
-                                                            </button>
-                                                        </>
-                                                    )}
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
+                    </article>
                 </section>
             </div>
         </div>
