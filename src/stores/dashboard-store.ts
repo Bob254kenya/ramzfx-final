@@ -30,7 +30,7 @@ type TDialogOptions = {
     type?: string;
 };
 
-type TTradingModule = 'auto_trades' | 'scanner' | 'speed_bot' | 'aviator_accumulator';
+type TTradingModule = 'auto_trades' | 'scanner' | 'speed_bot' | 'aviator_accumulator' | 'pro_scanner' | 'auto_bots';
 type TStopTradingHandler = () => void | Promise<void>;
 
 export interface IDashboardStore {
@@ -547,4 +547,4 @@ export default class DashboardStore implements IDashboardStore {
             this.setActiveTour('');
         }
     };
-}
+    }
