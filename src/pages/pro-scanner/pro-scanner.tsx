@@ -17,20 +17,13 @@ import './pro-scanner.scss';
 
 type TTick = { epoch: number; quote: number };
 
-type TStrategyId = 'over_under' | 'even_odd' | 'matches_differs' | 'rise_fall' | 'pattern' | 'digit';
+type TContractType = 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF' | 'CALL' | 'PUT';
 
-type TContractType = 'DIGITOVER' | 'DIGITUNDER' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITMATCH' | 'DIGITDIFF' | 'CALL' | 'PUT';
+type TSignalMode = 'streak' | 'pattern' | 'digit';
 
 type TDigitOp = '==' | '!=' | '>' | '>=' | '<' | '<=';
 
-type TSignal = {
-    barrier?: string;
-    contractType: TContractType;
-    label: string;
-    recoveryBarrier?: string;
-    recoveryContractType?: TContractType;
-    recoveryLabel?: string;
-};
+type TSignal = { barrier?: string; contractType: TContractType; label: string };
 
 type TMarket = { label: string; symbol: string };
 
@@ -41,15 +34,16 @@ type TMarketMode = 'fixed' | 'auto';
 type TSlotId = 'm1' | 'm2';
 
 type TSlotConfig = {
+    barrier: string;
+    contractType: TContractType;
     digitCompare: number;
     digitOp: TDigitOp;
     digitWindow: number;
     marketMode: TMarketMode;
     pattern: string;
-    strategyId: TStrategyId;
+    signalMode: TSignalMode;
+    streak: number;
     symbol: string;
-    targetBarrier: string;
-    targetContract: 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF';
 };
 
 type TScanResult = { confidence: number; lines: string[]; signal: TSignal; symbol: string };
@@ -74,11 +68,21 @@ const MARKETS: TMarket[] = [
     { label: 'Volatility 100 Index', symbol: 'R_100' },
 ];
 
-const STRATEGIES: { id: TStrategyId; label: string }[] = [
-    { id: 'over_under', label: 'Over & Under' },
-    { id: 'even_odd', label: 'Even & Odd' },
-    { id: 'matches_differs', label: 'Matches & Differs' },
-    { id: 'rise_fall', label: 'Rise & Fall' },
+/** Manual contract type list — exactly what gets traded. Nothing here is auto-picked. */
+const CONTRACT_TYPES: { id: TContractType; isDigit: boolean; label: string; needsBarrier: boolean }[] = [
+    { id: 'DIGITEVEN', isDigit: true, label: 'Even', needsBarrier: false },
+    { id: 'DIGITODD', isDigit: true, label: 'Odd', needsBarrier: false },
+    { id: 'DIGITOVER', isDigit: true, label: 'Over', needsBarrier: true },
+    { id: 'DIGITUNDER', isDigit: true, label: 'Under', needsBarrier: true },
+    { id: 'DIGITMATCH', isDigit: true, label: 'Matches', needsBarrier: true },
+    { id: 'DIGITDIFF', isDigit: true, label: 'Differs', needsBarrier: true },
+    { id: 'CALL', isDigit: false, label: 'Rise', needsBarrier: false },
+    { id: 'PUT', isDigit: false, label: 'Fall', needsBarrier: false },
+];
+
+/** Signal Mode decides WHEN to fire the manually chosen contract — it never changes what gets traded. */
+const SIGNAL_MODES: { id: TSignalMode; label: string }[] = [
+    { id: 'streak', label: 'Consecutive streak' },
     { id: 'pattern', label: 'Pattern (E/O sequence)' },
     { id: 'digit', label: 'Digit condition' },
 ];
@@ -92,17 +96,7 @@ const DIGIT_OPS: { id: TDigitOp; label: string }[] = [
     { id: '<=', label: '≤ (less or equal)' },
 ];
 
-const TARGET_CONTRACTS: { id: TSlotConfig['targetContract']; label: string; needsBarrier: boolean }[] = [
-    { id: 'DIGITEVEN', label: 'Digit Even', needsBarrier: false },
-    { id: 'DIGITODD', label: 'Digit Odd', needsBarrier: false },
-    { id: 'DIGITOVER', label: 'Digit Over', needsBarrier: true },
-    { id: 'DIGITUNDER', label: 'Digit Under', needsBarrier: true },
-    { id: 'DIGITMATCH', label: 'Digit Matches', needsBarrier: true },
-    { id: 'DIGITDIFF', label: 'Digit Differs', needsBarrier: true },
-];
-
 const MAX_TICKS = 1000;
-const MIN_SAMPLE_FOR_SIGNAL = 100;
 const SCAN_HISTORY_COUNT = 300;
 const SCAN_RETRY_DELAY_MS = 1200;
 const DEFAULT_STAKE = '0.5';
@@ -114,27 +108,29 @@ const MARTINGALE_STEPS = [1, 1.2, 1.5, 1.8, 2, 2.2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 
 const MAX_LOG_ENTRIES = 120;
 
 const DEFAULT_M1_CONFIG: TSlotConfig = {
+    barrier: '1',
+    contractType: 'DIGITOVER',
     digitCompare: 5,
     digitOp: '==',
     digitWindow: 3,
     marketMode: 'fixed',
     pattern: 'EOE',
-    strategyId: 'over_under',
+    signalMode: 'streak',
+    streak: 4,
     symbol: 'R_10',
-    targetBarrier: '5',
-    targetContract: 'DIGITEVEN',
 };
 
 const DEFAULT_M2_CONFIG: TSlotConfig = {
+    barrier: '8',
+    contractType: 'DIGITUNDER',
     digitCompare: 5,
     digitOp: '==',
     digitWindow: 3,
     marketMode: 'fixed',
     pattern: 'OEO',
-    strategyId: 'even_odd',
+    signalMode: 'streak',
+    streak: 4,
     symbol: 'R_25',
-    targetBarrier: '5',
-    targetContract: 'DIGITODD',
 };
 
 // ============================================================================
@@ -144,6 +140,8 @@ const DEFAULT_M2_CONFIG: TSlotConfig = {
 const cleanMoney = (value: string) => value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
 const cleanInt = (value: string) => value.replace(/[^\d]/g, '');
 const labelForSymbol = (symbol: string) => MARKETS.find(m => m.symbol === symbol)?.label ?? symbol;
+const labelForContract = (contractType: TContractType) => CONTRACT_TYPES.find(c => c.id === contractType)?.label ?? contractType;
+const isDirectionContract = (contractType: TContractType) => contractType === 'CALL' || contractType === 'PUT';
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const digitsFromTicks = (ticks: TTick[], symbol: string) => ticks.map(tick => getLastDigitFromQuote(tick.quote, symbol));
@@ -176,129 +174,97 @@ const compareDigit = (digit: number, op: TDigitOp, compare: number): boolean => 
     }
 };
 
-const buildTargetSignal = (config: TSlotConfig): TSignal => {
-    const meta = TARGET_CONTRACTS.find(t => t.id === config.targetContract) ?? TARGET_CONTRACTS[0];
-    if (!meta.needsBarrier) return { contractType: meta.id, label: meta.label };
-    return { barrier: config.targetBarrier, contractType: meta.id, label: `${meta.label} ${config.targetBarrier}` };
+/** Whether a single digit satisfies the manually selected contract's own condition (used by streak mode). */
+const digitMatchesContract = (digit: number, contractType: TContractType, barrier: number): boolean => {
+    switch (contractType) {
+        case 'DIGITEVEN':
+            return digit % 2 === 0;
+        case 'DIGITODD':
+            return digit % 2 === 1;
+        case 'DIGITOVER':
+            return digit > barrier;
+        case 'DIGITUNDER':
+            return digit < barrier;
+        case 'DIGITMATCH':
+            return digit === barrier;
+        case 'DIGITDIFF':
+            return digit !== barrier;
+        default:
+            return false;
+    }
 };
 
-/** Evaluates a slot's configured strategy against a tick window. Returns null when there is no trade signal yet. */
-const evaluateStrategy = (config: TSlotConfig, ticks: TTick[], symbol: string): { confidence: number; lines: string[]; signal: TSignal } | null => {
-    const digits = digitsFromTicks(ticks, symbol);
-    const sample = digits.length;
+const buildManualSignal = (config: TSlotConfig): TSignal => {
+    const meta = CONTRACT_TYPES.find(c => c.id === config.contractType) ?? CONTRACT_TYPES[0];
+    if (!meta.needsBarrier) return { contractType: meta.id, label: meta.label };
+    return { barrier: config.barrier, contractType: meta.id, label: `${meta.label} ${config.barrier}` };
+};
 
-    if (config.strategyId === 'pattern') {
+/**
+ * Evaluates a slot: the contract to trade is always whatever the user picked manually
+ * (config.contractType / config.barrier). The Signal Mode only decides WHEN to fire it.
+ * Returns null while there is no trade signal yet.
+ */
+const evaluateStrategy = (config: TSlotConfig, ticks: TTick[], symbol: string): { confidence: number; lines: string[]; signal: TSignal } | null => {
+    const barrierNum = Number(config.barrier) || 0;
+    const digits = digitsFromTicks(ticks, symbol);
+
+    if (config.signalMode === 'pattern') {
+        if (isDirectionContract(config.contractType)) return null; // pattern only applies to digit contracts
         const clean = config.pattern.toUpperCase().replace(/[^EO]/g, '');
-        if (clean.length < 2 || sample < clean.length) return null;
+        if (clean.length < 2 || digits.length < clean.length) return null;
         const recent = digits.slice(-clean.length);
         const matched = recent.every((digit, index) => (digit % 2 === 0 ? 'E' : 'O') === clean[index]);
         if (!matched) return null;
         return {
             confidence: 1,
             lines: [`Pattern ${clean} matched on the last ${clean.length} digits.`],
-            signal: buildTargetSignal(config),
+            signal: buildManualSignal(config),
         };
     }
 
-    if (config.strategyId === 'digit') {
+    if (config.signalMode === 'digit') {
+        if (isDirectionContract(config.contractType)) return null; // digit condition only applies to digit contracts
         const window = Math.max(1, config.digitWindow);
-        if (sample < window) return null;
+        if (digits.length < window) return null;
         const recent = digits.slice(-window);
         const matchCount = recent.filter(digit => compareDigit(digit, config.digitOp, config.digitCompare)).length;
         if (matchCount !== window) return null;
         return {
-            confidence: matchCount / window,
+            confidence: 1,
             lines: [`Last ${window} digits all satisfy "digit ${config.digitOp} ${config.digitCompare}".`],
-            signal: buildTargetSignal(config),
+            signal: buildManualSignal(config),
         };
     }
 
-    if (sample < MIN_SAMPLE_FOR_SIGNAL) return null;
+    // signalMode === 'streak' — fires once N consecutive ticks already satisfy the chosen contract
+    const streak = Math.max(1, config.streak);
 
-    if (config.strategyId === 'over_under') {
-        let lowCount = 0; // 0-4
-        let highCount = 0; // 5-9
-        digits.forEach(d => (d <= 4 ? lowCount++ : highCount++));
-        const lowPct = ((lowCount / sample) * 100).toFixed(1);
-        const highPct = ((highCount / sample) * 100).toFixed(1);
-        const confidence = Math.abs(lowCount - highCount) / sample;
-
-        if (lowCount <= highCount) {
-            return {
-                confidence,
-                lines: [`Digits 0-4 are less frequent (${lowPct}%) — trading OVER.`, 'Primary: Over 1 · Recovery: Over 3'],
-                signal: {
-                    barrier: '1',
-                    contractType: 'DIGITOVER',
-                    label: 'Over 1',
-                    recoveryBarrier: '3',
-                    recoveryContractType: 'DIGITOVER',
-                    recoveryLabel: 'Over 3',
-                },
-            };
+    if (isDirectionContract(config.contractType)) {
+        let count = 0;
+        for (let i = ticks.length - 1; i > 0; i -= 1) {
+            const matches = config.contractType === 'CALL' ? ticks[i].quote > ticks[i - 1].quote : ticks[i].quote < ticks[i - 1].quote;
+            if (!matches) break;
+            count += 1;
         }
+        if (count < streak) return null;
         return {
-            confidence,
-            lines: [`Digits 5-9 are less frequent (${highPct}%) — trading UNDER.`, 'Primary: Under 8 · Recovery: Under 6'],
-            signal: {
-                barrier: '8',
-                contractType: 'DIGITUNDER',
-                label: 'Under 8',
-                recoveryBarrier: '6',
-                recoveryContractType: 'DIGITUNDER',
-                recoveryLabel: 'Under 6',
-            },
+            confidence: count - streak + 1,
+            lines: [`${count} consecutive ${config.contractType === 'CALL' ? 'rises' : 'falls'} detected (needed ${streak}).`],
+            signal: buildManualSignal(config),
         };
     }
 
-    if (config.strategyId === 'even_odd') {
-        const evenCount = digits.filter(d => d % 2 === 0).length;
-        const oddCount = sample - evenCount;
-        const confidence = Math.abs(evenCount - oddCount) / sample;
-        if (evenCount >= oddCount) {
-            return {
-                confidence,
-                lines: [`EVEN dominates the last ${sample} ticks (${((evenCount / sample) * 100).toFixed(1)}%).`],
-                signal: { contractType: 'DIGITEVEN', label: 'Even' },
-            };
-        }
-        return {
-            confidence,
-            lines: [`ODD dominates the last ${sample} ticks (${((oddCount / sample) * 100).toFixed(1)}%).`],
-            signal: { contractType: 'DIGITODD', label: 'Odd' },
-        };
+    let count = 0;
+    for (let i = digits.length - 1; i >= 0; i -= 1) {
+        if (!digitMatchesContract(digits[i], config.contractType, barrierNum)) break;
+        count += 1;
     }
-
-    if (config.strategyId === 'matches_differs') {
-        const stats = digitStatsFrom(digits);
-        let mostCommon = 0;
-        let leastCommon = 0;
-        stats.forEach((pct, digit) => {
-            if (pct > stats[mostCommon]) mostCommon = digit;
-            if (pct < stats[leastCommon]) leastCommon = digit;
-        });
-        const confidence = (stats[mostCommon] - stats[leastCommon]) / 100;
-        return {
-            confidence,
-            lines: [`Digit ${mostCommon} is the most common (${stats[mostCommon]}%).`, `Digit ${leastCommon} is the least common (${stats[leastCommon]}%) — trading DIFFERS.`],
-            signal: { barrier: String(leastCommon), contractType: 'DIGITDIFF', label: `Differs ${leastCommon}` },
-        };
-    }
-
-    // rise_fall
-    let ups = 0;
-    let downs = 0;
-    for (let i = 1; i < ticks.length; i += 1) {
-        if (ticks[i].quote > ticks[i - 1].quote) ups += 1;
-        else if (ticks[i].quote < ticks[i - 1].quote) downs += 1;
-    }
-    const total = Math.max(ups + downs, 1);
-    const confidence = Math.abs(ups - downs) / total;
-    const rising = ups >= downs;
+    if (count < streak) return null;
     return {
-        confidence,
-        lines: [`Price moved up ${ups} times and down ${downs} times in this window.`, rising ? 'Momentum favors RISE.' : 'Momentum favors FALL.'],
-        signal: rising ? { contractType: 'CALL', label: 'Rise' } : { contractType: 'PUT', label: 'Fall' },
+        confidence: count - streak + 1,
+        lines: [`${count} consecutive digits match "${labelForContract(config.contractType)}" (needed ${streak}).`],
+        signal: buildManualSignal(config),
     };
 };
 
@@ -380,42 +346,94 @@ const SlotFields: React.FC<{
     config: TSlotConfig;
     disabled: boolean;
     onChange: (patch: Partial<TSlotConfig>) => void;
-}> = ({ config, disabled, onChange }) => (
-    <>
-        <label className='scanner2-field'>
-            <span>Market mode</span>
-            <select value={config.marketMode} disabled={disabled} onChange={e => onChange({ marketMode: e.target.value as TMarketMode })}>
-                <option value='fixed'>Fixed market</option>
-                <option value='auto'>Auto — scan all markets</option>
-            </select>
-        </label>
+}> = ({ config, disabled, onChange }) => {
+    const contractMeta = CONTRACT_TYPES.find(c => c.id === config.contractType) ?? CONTRACT_TYPES[0];
+    const availableSignalModes = SIGNAL_MODES.filter(mode => (mode.id === 'pattern' || mode.id === 'digit' ? contractMeta.isDigit : true));
 
-        {config.marketMode === 'fixed' && (
+    return (
+        <>
             <label className='scanner2-field'>
-                <span>Market</span>
-                <select value={config.symbol} disabled={disabled} onChange={e => onChange({ symbol: e.target.value })}>
-                    {MARKETS.map(market => (
-                        <option key={market.symbol} value={market.symbol}>
-                            {market.label}
+                <span>Market mode</span>
+                <select value={config.marketMode} disabled={disabled} onChange={e => onChange({ marketMode: e.target.value as TMarketMode })}>
+                    <option value='fixed'>Fixed market</option>
+                    <option value='auto'>Auto — scan all markets</option>
+                </select>
+            </label>
+
+            {config.marketMode === 'fixed' && (
+                <label className='scanner2-field'>
+                    <span>Market</span>
+                    <select value={config.symbol} disabled={disabled} onChange={e => onChange({ symbol: e.target.value })}>
+                        {MARKETS.map(market => (
+                            <option key={market.symbol} value={market.symbol}>
+                                {market.label}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+            )}
+
+            <div className='scanner2-field-row'>
+                <label className='scanner2-field'>
+                    <span>Contract Type</span>
+                    <select
+                        value={config.contractType}
+                        disabled={disabled}
+                        onChange={e => {
+                            const nextType = e.target.value as TContractType;
+                            const nextMeta = CONTRACT_TYPES.find(c => c.id === nextType);
+                            const patch: Partial<TSlotConfig> = { contractType: nextType };
+                            if (!nextMeta?.isDigit && (config.signalMode === 'pattern' || config.signalMode === 'digit')) {
+                                patch.signalMode = 'streak';
+                            }
+                            onChange(patch);
+                        }}
+                    >
+                        {CONTRACT_TYPES.map(c => (
+                            <option key={c.id} value={c.id}>
+                                {c.label}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                {contractMeta.needsBarrier && (
+                    <label className='scanner2-field'>
+                        <span>Barrier</span>
+                        <select value={config.barrier} disabled={disabled} onChange={e => onChange({ barrier: e.target.value })}>
+                            {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
+                                <option key={d} value={String(d)}>
+                                    {d}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                )}
+            </div>
+
+            <label className='scanner2-field'>
+                <span>Signal mode (when to trade it)</span>
+                <select value={config.signalMode} disabled={disabled} onChange={e => onChange({ signalMode: e.target.value as TSignalMode })}>
+                    {availableSignalModes.map(mode => (
+                        <option key={mode.id} value={mode.id}>
+                            {mode.label}
                         </option>
                     ))}
                 </select>
             </label>
-        )}
 
-        <label className='scanner2-field'>
-            <span>Strategy</span>
-            <select value={config.strategyId} disabled={disabled} onChange={e => onChange({ strategyId: e.target.value as TStrategyId })}>
-                {STRATEGIES.map(strat => (
-                    <option key={strat.id} value={strat.id}>
-                        {strat.label}
-                    </option>
-                ))}
-            </select>
-        </label>
+            {config.signalMode === 'streak' && (
+                <label className='scanner2-field'>
+                    <span>Consecutive ticks required</span>
+                    <input
+                        inputMode='numeric'
+                        disabled={disabled}
+                        value={String(config.streak)}
+                        onChange={e => onChange({ streak: Math.max(1, Number(cleanInt(e.target.value)) || 1) })}
+                    />
+                </label>
+            )}
 
-        {config.strategyId === 'pattern' && (
-            <>
+            {config.signalMode === 'pattern' && (
                 <label className='scanner2-field'>
                     <span>Pattern (E = even digit, O = odd digit)</span>
                     <input
@@ -426,94 +444,46 @@ const SlotFields: React.FC<{
                         onChange={e => onChange({ pattern: e.target.value.toUpperCase().replace(/[^EO]/g, '') })}
                     />
                 </label>
-                <div className='scanner2-field-row'>
-                    <label className='scanner2-field'>
-                        <span>Trade when matched</span>
-                        <select value={config.targetContract} disabled={disabled} onChange={e => onChange({ targetContract: e.target.value as TSlotConfig['targetContract'] })}>
-                            {TARGET_CONTRACTS.map(t => (
-                                <option key={t.id} value={t.id}>
-                                    {t.label}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                    {TARGET_CONTRACTS.find(t => t.id === config.targetContract)?.needsBarrier && (
-                        <label className='scanner2-field'>
-                            <span>Barrier</span>
-                            <select value={config.targetBarrier} disabled={disabled} onChange={e => onChange({ targetBarrier: e.target.value })}>
-                                {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
-                                    <option key={d} value={String(d)}>
-                                        {d}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                    )}
-                </div>
-            </>
-        )}
+            )}
 
-        {config.strategyId === 'digit' && (
-            <>
-                <div className='scanner2-field-row'>
-                    <label className='scanner2-field'>
-                        <span>Condition</span>
-                        <select value={config.digitOp} disabled={disabled} onChange={e => onChange({ digitOp: e.target.value as TDigitOp })}>
-                            {DIGIT_OPS.map(op => (
-                                <option key={op.id} value={op.id}>
-                                    {op.label}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                    <label className='scanner2-field'>
-                        <span>Compare digit</span>
-                        <select value={config.digitCompare} disabled={disabled} onChange={e => onChange({ digitCompare: Number(e.target.value) })}>
-                            {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
-                                <option key={d} value={d}>
-                                    {d}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                </div>
-                <label className='scanner2-field'>
-                    <span>Confirm over last N ticks</span>
-                    <input
-                        inputMode='numeric'
-                        disabled={disabled}
-                        value={String(config.digitWindow)}
-                        onChange={e => onChange({ digitWindow: Math.max(1, Number(cleanInt(e.target.value)) || 1) })}
-                    />
-                </label>
-                <div className='scanner2-field-row'>
-                    <label className='scanner2-field'>
-                        <span>Trade when matched</span>
-                        <select value={config.targetContract} disabled={disabled} onChange={e => onChange({ targetContract: e.target.value as TSlotConfig['targetContract'] })}>
-                            {TARGET_CONTRACTS.map(t => (
-                                <option key={t.id} value={t.id}>
-                                    {t.label}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                    {TARGET_CONTRACTS.find(t => t.id === config.targetContract)?.needsBarrier && (
+            {config.signalMode === 'digit' && (
+                <>
+                    <div className='scanner2-field-row'>
                         <label className='scanner2-field'>
-                            <span>Barrier</span>
-                            <select value={config.targetBarrier} disabled={disabled} onChange={e => onChange({ targetBarrier: e.target.value })}>
+                            <span>Condition</span>
+                            <select value={config.digitOp} disabled={disabled} onChange={e => onChange({ digitOp: e.target.value as TDigitOp })}>
+                                {DIGIT_OPS.map(op => (
+                                    <option key={op.id} value={op.id}>
+                                        {op.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className='scanner2-field'>
+                            <span>Compare digit</span>
+                            <select value={config.digitCompare} disabled={disabled} onChange={e => onChange({ digitCompare: Number(e.target.value) })}>
                                 {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
-                                    <option key={d} value={String(d)}>
+                                    <option key={d} value={d}>
                                         {d}
                                     </option>
                                 ))}
                             </select>
                         </label>
-                    )}
-                </div>
-            </>
-        )}
-    </>
-);
+                    </div>
+                    <label className='scanner2-field'>
+                        <span>Confirm over last N ticks</span>
+                        <input
+                            inputMode='numeric'
+                            disabled={disabled}
+                            value={String(config.digitWindow)}
+                            onChange={e => onChange({ digitWindow: Math.max(1, Number(cleanInt(e.target.value)) || 1) })}
+                        />
+                    </label>
+                </>
+            )}
+        </>
+    );
+};
 
 // ============================================================================
 // Component
@@ -584,10 +554,9 @@ const ProScanner = observer(() => {
     const digitStats = useMemo(() => digitStatsFrom(digits), [digits]);
     const latestTick = ticks[ticks.length - 1];
     const latestDigit = latestTick ? getLastDigitFromQuote(latestTick.quote, displaySymbol) : null;
-    const hasEnoughSamples = digits.length >= MIN_SAMPLE_FOR_SIGNAL;
     const preview = useMemo(
-        () => (!isRunning && m1.marketMode === 'fixed' && hasEnoughSamples ? evaluateStrategy(m1, ticks, displaySymbol) : null),
-        [displaySymbol, hasEnoughSamples, isRunning, m1, ticks]
+        () => (!isRunning && m1.marketMode === 'fixed' && ticks.length > 0 ? evaluateStrategy(m1, ticks, displaySymbol) : null),
+        [displaySymbol, isRunning, m1, ticks]
     );
     const isCoveredByMobileRunPanel = !isDesktop && run_panel.is_drawer_open;
 
@@ -771,6 +740,8 @@ const ProScanner = observer(() => {
     // at which point the cycle resets back to M1. If M2 is disabled, losses simply
     // martingale on M1 itself. Each slot can independently be a fixed market or
     // set to "auto", which scans every market and trades the strongest signal.
+    // In every case the contract that gets traded is exactly what was picked
+    // manually in the Contract Type field — Signal Mode only decides the timing.
 
     const runLoop = useCallback(async () => {
         while (!shouldStopRef.current) {
@@ -793,9 +764,9 @@ const ProScanner = observer(() => {
             setIsScanning(true);
             pushLog(
                 'info',
-                `${slot.toUpperCase()}: scanning ${config.marketMode === 'auto' ? 'all markets' : labelForSymbol(config.symbol)} for a ${
-                    STRATEGIES.find(s => s.id === config.strategyId)?.label
-                } signal…`
+                `${slot.toUpperCase()}: scanning ${config.marketMode === 'auto' ? 'all markets' : labelForSymbol(config.symbol)} for ${labelForContract(config.contractType)} via ${
+                    SIGNAL_MODES.find(m => m.id === config.signalMode)?.label
+                }…`
             );
 
             let found: TScanResult | null = null;
@@ -887,11 +858,11 @@ const ProScanner = observer(() => {
             pushLog('error', 'Enter valid Stop Loss and Take Profit amounts.');
             return;
         }
-        if (m1.strategyId === 'pattern' && m1.pattern.replace(/[^EO]/g, '').length < 2) {
+        if (m1.signalMode === 'pattern' && m1.pattern.replace(/[^EO]/g, '').length < 2) {
             pushLog('error', 'M1 pattern needs at least 2 E/O characters.');
             return;
         }
-        if (m2Enabled && m2.strategyId === 'pattern' && m2.pattern.replace(/[^EO]/g, '').length < 2) {
+        if (m2Enabled && m2.signalMode === 'pattern' && m2.pattern.replace(/[^EO]/g, '').length < 2) {
             pushLog('error', 'M2 pattern needs at least 2 E/O characters.');
             return;
         }
@@ -923,9 +894,19 @@ const ProScanner = observer(() => {
         setCurrentStakeDisplay(stake);
         setIsRunning(true);
         setLog([]);
-        pushLog('info', `Started. M1: ${m1.marketMode === 'auto' ? 'auto-scan all markets' : labelForSymbol(m1.symbol)} · ${STRATEGIES.find(s => s.id === m1.strategyId)?.label}.`);
+        pushLog(
+            'info',
+            `Started. M1: ${m1.marketMode === 'auto' ? 'auto-scan all markets' : labelForSymbol(m1.symbol)} · ${labelForContract(m1.contractType)} via ${
+                SIGNAL_MODES.find(s => s.id === m1.signalMode)?.label
+            }.`
+        );
         if (m2Enabled) {
-            pushLog('info', `M2 recovery: ${m2.marketMode === 'auto' ? 'auto-scan all markets' : labelForSymbol(m2.symbol)} · ${STRATEGIES.find(s => s.id === m2.strategyId)?.label}.`);
+            pushLog(
+                'info',
+                `M2 recovery: ${m2.marketMode === 'auto' ? 'auto-scan all markets' : labelForSymbol(m2.symbol)} · ${labelForContract(m2.contractType)} via ${
+                    SIGNAL_MODES.find(s => s.id === m2.signalMode)?.label
+                }.`
+            );
         } else {
             pushLog('info', 'M2 recovery disabled — losses will martingale on M1.');
         }
@@ -951,7 +932,7 @@ const ProScanner = observer(() => {
                 <div className='scanner2-header'>
                     <div>
                         <h1 className='scanner2-header__title'>Pro Scanner Bot</h1>
-                        <p className='scanner2-header__subtitle'>Dual-market recovery scanning with pattern, digit &amp; classic strategies</p>
+                        <p className='scanner2-header__subtitle'>Pick your contract manually, choose when it fires, let M1/M2 handle recovery</p>
                     </div>
                     <div className={classNames('scanner2-status', { 'scanner2-status--live': isConnected })}>
                         <span className='scanner2-status__dot' />
@@ -1066,7 +1047,7 @@ const ProScanner = observer(() => {
                             <p className='scanner2-sample'>{isScanning ? 'Scanning for a signal…' : `Trading on ${labelForSymbol(displaySymbol)}`}</p>
                         ) : (
                             <p className='scanner2-sample'>
-                                {digits.length}/{MIN_SAMPLE_FOR_SIGNAL} ticks collected {hasEnoughSamples ? '· ready' : '· warming up'}
+                                {digits.length} ticks collected {preview ? '· signal ready' : '· waiting for condition'}
                                 {m1.marketMode === 'auto' && ' · M1 is set to auto-scan all markets, so no single-market preview is shown until you start'}
                             </p>
                         )}
@@ -1075,7 +1056,6 @@ const ProScanner = observer(() => {
                             <div className='scanner2-signal'>
                                 <p className='scanner2-signal__label'>
                                     M1 preview signal: <strong>{preview.signal.label}</strong>
-                                    {preview.signal.recoveryLabel && <> · recovery <strong>{preview.signal.recoveryLabel}</strong></>}
                                 </p>
                                 {preview.lines.map((line, idx) => (
                                     <p key={idx} className='scanner2-signal__line'>
