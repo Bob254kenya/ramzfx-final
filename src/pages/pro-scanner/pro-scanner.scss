@@ -408,6 +408,133 @@ $sc-text-faint: #4d5c7c;
     }
 }
 
+// ============================================
+// DIGIT PATTERN STRATEGY STYLES
+// ============================================
+
+.scanner2-digit-pattern {
+    background: $sc-bg-panel-2;
+    border: 1px solid $sc-border;
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+
+    &__mode {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+
+        span {
+            font-size: 11px;
+            color: $sc-text-dim;
+            font-weight: 500;
+        }
+    }
+
+    &__mode-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 4px;
+    }
+
+    &__mode-btn {
+        border: none;
+        border-radius: 6px;
+        padding: 6px 8px;
+        font-size: 10px;
+        font-weight: 600;
+        background: $sc-bg-panel;
+        color: $sc-text-faint;
+        cursor: pointer;
+        transition: all 0.15s ease;
+
+        &:hover:not(:disabled) {
+            color: $sc-text;
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        &.active {
+            background: $sc-purple;
+            color: #fff;
+            box-shadow: 0 0 20px $sc-purple-glow;
+        }
+    }
+
+    &__field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+
+        label {
+            font-size: 10px;
+            color: $sc-text-faint;
+        }
+    }
+
+    &__input {
+        background: $sc-bg-panel;
+        border: 1px solid $sc-border;
+        border-radius: 6px;
+        padding: 6px 8px;
+        color: $sc-text;
+        font-size: 12px;
+        font-family: monospace;
+        outline: none;
+        transition: border-color 0.15s ease;
+
+        &:focus {
+            border-color: $sc-teal;
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
+    &__select {
+        background: $sc-bg-panel;
+        border: 1px solid $sc-border;
+        border-radius: 6px;
+        padding: 6px 8px;
+        color: $sc-text;
+        font-size: 12px;
+        outline: none;
+        cursor: pointer;
+
+        &:focus {
+            border-color: $sc-teal;
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
+    &__row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+    }
+
+    &__hint {
+        font-size: 10px;
+        font-family: monospace;
+        color: $sc-text-faint;
+    }
+}
+
+// ============================================
+// OTHER SCANNER STYLES
+// ============================================
+
 .scanner2-price {
     display: flex;
     align-items: baseline;
@@ -854,6 +981,12 @@ $sc-text-faint: #4d5c7c;
     .scanner2-histogram {
         height: 90px;
     }
+
+    .scanner2-digit-pattern {
+        &__row {
+            grid-template-columns: 1fr;
+        }
+    }
 }
 
 @media (max-width: 480px) {
@@ -919,6 +1052,12 @@ $sc-text-faint: #4d5c7c;
         }
         &__pnl {
             font-size: 22px;
+        }
+    }
+
+    .scanner2-digit-pattern {
+        &__mode-buttons {
+            grid-template-columns: 1fr 1fr 1fr;
         }
     }
 }
