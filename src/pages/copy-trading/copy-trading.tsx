@@ -23,7 +23,22 @@ type TActiveCopy = {
     token: string;
 };
 
+type TFollower = {
+    added_at: number;
+    id: string;
+    label: string;
+    token: string;
+};
+
+type TFollowerBalanceState = {
+    error?: string;
+    info?: TTokenAccountInfo;
+    loading: boolean;
+};
+
 const STORAGE_KEY = 'copy_trading_active_relationships';
+const FOLLOWERS_STORAGE_KEY = 'copy_trading_followers_list';
+const MAX_FOLLOWERS = 50;
 const TRADE_TYPE_OPTIONS = ['CALL', 'PUT', 'ACCU', 'MULTUP', 'MULTDOWN', 'DIGITMATCH', 'DIGITDIFF'];
 
 const maskToken = (token: string) => {
@@ -45,6 +60,25 @@ const loadStoredRelationships = (): TActiveCopy[] => {
 const persistRelationships = (relationships: TActiveCopy[]) => {
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(relationships));
+    } catch {
+        // Storage may be unavailable (private browsing); non-fatal.
+    }
+};
+
+const loadStoredFollowers = (): TFollower[] => {
+    try {
+        const raw = localStorage.getItem(FOLLOWERS_STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.slice(0, MAX_FOLLOWERS) : [];
+    } catch {
+        return [];
+    }
+};
+
+const persistFollowers = (followers: TFollower[]) => {
+    try {
+        localStorage.setItem(FOLLOWERS_STORAGE_KEY, JSON.stringify(followers));
     } catch {
         // Storage may be unavailable (private browsing); non-fatal.
     }
@@ -85,9 +119,70 @@ const CopyTrading = observer(() => {
     const [statusMessage, setStatusMessage] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
 
+    // ==================== Followers section (people copying you) ====================
+    const [followers, setFollowers] = useState<TFollower[]>([]);
+    const [followerBalances, setFollowerBalances] = useState<Record<string, TFollowerBalanceState>>({});
+    const [newFollowerLabel, setNewFollowerLabel] = useState('');
+    const [newFollowerToken, setNewFollowerToken] = useState('');
+    const [newFollowerPreview, setNewFollowerPreview] = useState<TTokenAccountInfo | null>(null);
+    const [isVerifyingNewFollower, setIsVerifyingNewFollower] = useState(false);
+    const [newFollowerError, setNewFollowerError] = useState('');
+    const [isAddingFollower, setIsAddingFollower] = useState(false);
+    const [isRefreshingAllFollowers, setIsRefreshingAllFollowers] = useState(false);
+
     useEffect(() => {
         setActiveRelationships(loadStoredRelationships());
+        setFollowers(loadStoredFollowers());
     }, []);
+
+    // Verify + preview the balance of a follower before adding them.
+    useEffect(() => {
+        const token = newFollowerToken.trim();
+        setNewFollowerPreview(null);
+        setNewFollowerError('');
+        if (!token) return undefined;
+
+        setIsVerifyingNewFollower(true);
+        const handle = setTimeout(() => {
+            fetchAccountInfoForToken(token)
+                .then(info => setNewFollowerPreview(info))
+                .catch(error =>
+                    setNewFollowerError(error instanceof Error ? error.message : 'Could not verify this token.')
+                )
+                .finally(() => setIsVerifyingNewFollower(false));
+        }, 600);
+
+        return () => {
+            clearTimeout(handle);
+            setIsVerifyingNewFollower(false);
+        };
+    }, [newFollowerToken]);
+
+    // Fetch each follower's live balance whenever the followers list changes (e.g. on load).
+    useEffect(() => {
+        followers.forEach(follower => {
+            setFollowerBalances(prev => ({
+                ...prev,
+                [follower.id]: { ...(prev[follower.id] ?? { loading: false }), loading: true, error: undefined },
+            }));
+            fetchAccountInfoForToken(follower.token)
+                .then(info => {
+                    setFollowerBalances(prev => ({ ...prev, [follower.id]: { info, loading: false } }));
+                })
+                .catch(error => {
+                    setFollowerBalances(prev => ({
+                        ...prev,
+                        [follower.id]: {
+                            info: prev[follower.id]?.info,
+                            loading: false,
+                            error: error instanceof Error ? error.message : 'Could not refresh balance.',
+                        },
+                    }));
+                });
+        });
+        // Only re-run when the number/identity of followers changes, not on every render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [followers.map(item => item.id).join(',')]);
 
     // ==================== Auto-fetch balance when a token is pasted ====================
 
@@ -240,6 +335,105 @@ const CopyTrading = observer(() => {
     const toggleTradeType = (type: string) => {
         setSelectedTradeTypes(prev => (prev.includes(type) ? prev.filter(item => item !== type) : [...prev, type]));
     };
+
+    const refreshFollowerBalance = useCallback((follower: TFollower) => {
+        setFollowerBalances(prev => ({
+            ...prev,
+            [follower.id]: { ...(prev[follower.id] ?? { loading: false }), loading: true, error: undefined },
+        }));
+        fetchAccountInfoForToken(follower.token)
+            .then(info => {
+                setFollowerBalances(prev => ({ ...prev, [follower.id]: { info, loading: false } }));
+            })
+            .catch(error => {
+                setFollowerBalances(prev => ({
+                    ...prev,
+                    [follower.id]: {
+                        info: prev[follower.id]?.info,
+                        loading: false,
+                        error: error instanceof Error ? error.message : 'Could not refresh balance.',
+                    },
+                }));
+            });
+    }, []);
+
+    const handleAddFollower = useCallback(async () => {
+        const token = newFollowerToken.trim();
+        if (!token) {
+            setNewFollowerError('Enter the follower\u2019s API token first.');
+            return;
+        }
+        if (followers.length >= MAX_FOLLOWERS) {
+            setNewFollowerError(`You\u2019ve reached the maximum of ${MAX_FOLLOWERS} followers.`);
+            return;
+        }
+        if (followers.some(item => item.token === token)) {
+            setNewFollowerError('This follower has already been added.');
+            return;
+        }
+
+        setNewFollowerError('');
+        setIsAddingFollower(true);
+        try {
+            const info = newFollowerPreview ?? (await fetchAccountInfoForToken(token));
+            const follower: TFollower = {
+                id: `${Date.now()}`,
+                label: newFollowerLabel.trim() || info.loginid || `Follower ${maskToken(token)}`,
+                token,
+                added_at: Date.now(),
+            };
+            const updated = [follower, ...followers];
+            setFollowers(updated);
+            persistFollowers(updated);
+            setFollowerBalances(prev => ({ ...prev, [follower.id]: { info, loading: false } }));
+
+            setStatusMessage(`\u2705 Added ${follower.label} as a follower (${updated.length}/${MAX_FOLLOWERS}).`);
+            setNewFollowerLabel('');
+            setNewFollowerToken('');
+            setNewFollowerPreview(null);
+        } catch (error) {
+            setNewFollowerError(error instanceof Error ? error.message : 'Could not verify or add this follower.');
+        } finally {
+            setIsAddingFollower(false);
+        }
+    }, [followers, newFollowerLabel, newFollowerPreview, newFollowerToken]);
+
+    const handleRemoveFollower = useCallback(
+        (follower: TFollower) => {
+            const updated = followers.filter(item => item.id !== follower.id);
+            setFollowers(updated);
+            persistFollowers(updated);
+            setFollowerBalances(prev => {
+                const next = { ...prev };
+                delete next[follower.id];
+                return next;
+            });
+            setStatusMessage(`Removed ${follower.label} from your followers.`);
+        },
+        [followers]
+    );
+
+    const handleRefreshAllFollowers = useCallback(async () => {
+        setIsRefreshingAllFollowers(true);
+        try {
+            await Promise.allSettled(followers.map(follower => fetchAccountInfoForToken(follower.token)
+                .then(info => {
+                    setFollowerBalances(prev => ({ ...prev, [follower.id]: { info, loading: false } }));
+                })
+                .catch(error => {
+                    setFollowerBalances(prev => ({
+                        ...prev,
+                        [follower.id]: {
+                            info: prev[follower.id]?.info,
+                            loading: false,
+                            error: error instanceof Error ? error.message : 'Could not refresh balance.',
+                        },
+                    }));
+                })));
+        } finally {
+            setIsRefreshingAllFollowers(false);
+        }
+    }, [followers]);
 
     if (!showCopyTrading) return null;
 
@@ -492,6 +686,176 @@ const CopyTrading = observer(() => {
                         <Localize i18n_default_text='This token is only stored in your browser for your own reference \u2014 it is never sent anywhere by this page except when you personally copy it to share.' />
                     </p>
                 </div>
+            </div>
+
+            {/* ==================== My Followers ==================== */}
+            <div className='copy-card copy-card--full'>
+                <div className='copy-followers-header'>
+                    <div>
+                        <h3 className='copy-card__title'>
+                            <Localize i18n_default_text='My Followers' />
+                        </h3>
+                        <p className='copy-card__subtitle'>
+                            <Localize i18n_default_text='People copying your trades. Add up to 50 followers using their read-only API tokens \u2014 each row shows their live account balance, and whether it\u2019s a Demo or Real account.' />
+                        </p>
+                    </div>
+                    <span className='copy-followers-count'>
+                        {followers.length}/{MAX_FOLLOWERS}
+                    </span>
+                </div>
+
+                <div className='copy-followers-form'>
+                    <label className='copy-field'>
+                        <span>
+                            <Localize i18n_default_text='Follower Name (optional)' />
+                        </span>
+                        <input
+                            type='text'
+                            placeholder='e.g. Sarah K.'
+                            value={newFollowerLabel}
+                            onChange={event => setNewFollowerLabel(event.target.value)}
+                            disabled={followers.length >= MAX_FOLLOWERS}
+                        />
+                    </label>
+                    <label className='copy-field'>
+                        <span>
+                            <Localize i18n_default_text="Follower's Read-Only API Token" />
+                        </span>
+                        <input
+                            type='text'
+                            placeholder='e.g. a1b2c3d4e5f6g7h8'
+                            value={newFollowerToken}
+                            onChange={event => setNewFollowerToken(event.target.value)}
+                            disabled={followers.length >= MAX_FOLLOWERS}
+                        />
+                    </label>
+
+                    {isVerifyingNewFollower && <p className='copy-balance-loading'>Verifying token...</p>}
+                    {newFollowerError && <p className='copy-balance-error'>{newFollowerError}</p>}
+                    {newFollowerPreview && (
+                        <div
+                            className={`copy-balance-card ${newFollowerPreview.is_virtual ? 'copy-balance-card--demo' : ''}`}
+                        >
+                            <div>
+                                <span className='copy-balance-card__label'>
+                                    <Localize i18n_default_text='Account' />
+                                </span>
+                                <span className='copy-balance-card__value'>
+                                    {newFollowerPreview.loginid}
+                                    {newFollowerPreview.is_virtual ? ' (Demo)' : ' (Real)'}
+                                </span>
+                            </div>
+                            <div>
+                                <span className='copy-balance-card__label'>
+                                    <Localize i18n_default_text='Balance' />
+                                </span>
+                                <span className='copy-balance-card__value'>
+                                    {newFollowerPreview.balance.toFixed(2)} {newFollowerPreview.currency}
+                                </span>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className='copy-card__actions'>
+                        <button
+                            type='button'
+                            className='copy-button copy-button--primary'
+                            disabled={isAddingFollower || followers.length >= MAX_FOLLOWERS}
+                            onClick={handleAddFollower}
+                        >
+                            <Localize
+                                i18n_default_text={
+                                    followers.length >= MAX_FOLLOWERS
+                                        ? 'Follower Limit Reached'
+                                        : isAddingFollower
+                                          ? 'Adding...'
+                                          : 'Add Follower'
+                                }
+                            />
+                        </button>
+                        {followers.length > 0 && (
+                            <button
+                                type='button'
+                                className='copy-button copy-button--secondary'
+                                disabled={isRefreshingAllFollowers}
+                                onClick={handleRefreshAllFollowers}
+                            >
+                                <Localize
+                                    i18n_default_text={isRefreshingAllFollowers ? 'Refreshing...' : 'Refresh All Balances'}
+                                />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {followers.length === 0 ? (
+                    <p className='copy-empty'>
+                        <Localize i18n_default_text='You have no followers yet. Add their read-only API tokens above to track them here.' />
+                    </p>
+                ) : (
+                    <div className='copy-followers-list'>
+                        {followers.map(follower => {
+                            const balance_state = followerBalances[follower.id];
+                            return (
+                                <div key={follower.id} className='copy-follower'>
+                                    <div className='copy-follower__info'>
+                                        <span className='copy-follower__label'>{follower.label}</span>
+                                        <span className='copy-follower__token'>{maskToken(follower.token)}</span>
+                                    </div>
+
+                                    <div className='copy-follower__balance'>
+                                        {balance_state?.loading && (
+                                            <span className='copy-balance-loading'>Updating...</span>
+                                        )}
+                                        {!balance_state?.loading && balance_state?.error && (
+                                            <span className='copy-balance-error'>{balance_state.error}</span>
+                                        )}
+                                        {!balance_state?.loading && balance_state?.info && (
+                                            <>
+                                                <span
+                                                    className={`copy-follower__badge ${
+                                                        balance_state.info.is_virtual
+                                                            ? 'copy-follower__badge--demo'
+                                                            : 'copy-follower__badge--real'
+                                                    }`}
+                                                >
+                                                    <Localize
+                                                        i18n_default_text={
+                                                            balance_state.info.is_virtual ? 'Demo' : 'Real'
+                                                        }
+                                                    />
+                                                </span>
+                                                <span className='copy-follower__amount'>
+                                                    {balance_state.info.balance.toFixed(2)}{' '}
+                                                    {balance_state.info.currency}
+                                                </span>
+                                            </>
+                                        )}
+                                    </div>
+
+                                    <div className='copy-follower__actions'>
+                                        <button
+                                            type='button'
+                                            className='copy-icon-button'
+                                            title='Refresh balance'
+                                            disabled={balance_state?.loading}
+                                            onClick={() => refreshFollowerBalance(follower)}
+                                        >
+                                            &#8635;
+                                        </button>
+                                        <button
+                                            type='button'
+                                            className='copy-button copy-button--stop'
+                                            onClick={() => handleRemoveFollower(follower)}
+                                        >
+                                            <Localize i18n_default_text='Remove' />
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
 
             {/* ==================== Active copy relationships ==================== */}
