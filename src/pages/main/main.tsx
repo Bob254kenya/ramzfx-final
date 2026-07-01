@@ -53,6 +53,8 @@ import Scanner from '../scanner';
 import SpeedBot from '../speed-bot';
 import AviatorAccumulator from '../aviator-accumulator';
 import CopyTrading from '../copy-trading';
+import ProScanner from '../pro-scanner';
+import AutoBots from '../auto-bots';
 import './main.scss';
 
 // ==================== SOCIAL POPUP COMPONENT ====================
@@ -322,6 +324,8 @@ const AppWrapper = observer(() => {
         'speed_bot',
         'aviator_accumulator',
         'copy_trading',
+        'pro_scanner',
+        'auto_bots',
     ];
     const show_bot_ideas = isDomainFeatureEnabled('botIdeas');
     const show_auto_trades = isDomainFeatureEnabled('autoTrades');
@@ -760,6 +764,28 @@ const AppWrapper = observer(() => {
                                 id='id-copy-trading'
                             >
                                 <CopyTrading />
+                            </div>
+                            <div
+                                label={
+                                    <>
+                                        <LabelPairedSearchCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
+                                        <Localize i18n_default_text='Pro Scanner'/>
+                                    </>
+                                }
+                                id='id-pro-scanner'
+                            >
+                                <ProScanner />
+                            </div>
+                            <div
+                                label={
+                                    <>
+                                        <LabelPairedChartTrendUpCaptionRegularIcon height='24px' width='24px' fill='#c8a45d' />
+                                        <Localize i18n_default_text='Auto Bots'/>
+                                    </>
+                                }
+                                id='id-auto-bots'
+                            >
+                                <AutoBots />
                             </div>
                         </Tabs>
                         {!isDesktop && right_tab_shadow && <span className='tabs-shadow tabs-shadow--right' />}
