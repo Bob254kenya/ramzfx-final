@@ -3,11 +3,13 @@ import { observer } from 'mobx-react-lite';
 import { DBOT_TABS } from '@/constants/bot-contents';
 import { useStore } from '@/hooks/useStore';
 import {
+    fetchAccountInfoForToken,
     fetchCopyTradingStatistics,
     setAllowCopiers,
     startCopyTrading,
     stopCopyTrading,
     TCopyTradingStats,
+    TTokenAccountInfo,
 } from '@/utils/copy-trading';
 import { Localize } from '@deriv-com/translations';
 import './copy-trading.scss';
@@ -68,6 +70,14 @@ const CopyTrading = observer(() => {
     const [stats, setStats] = useState<TCopyTradingStats | null>(null);
     const [isLoadingStats, setIsLoadingStats] = useState(false);
 
+    const [masterAccountInfo, setMasterAccountInfo] = useState<TTokenAccountInfo | null>(null);
+    const [isLoadingMasterBalance, setIsLoadingMasterBalance] = useState(false);
+    const [masterBalanceError, setMasterBalanceError] = useState('');
+
+    const [myAccountInfo, setMyAccountInfo] = useState<TTokenAccountInfo | null>(null);
+    const [isLoadingMyBalance, setIsLoadingMyBalance] = useState(false);
+    const [myBalanceError, setMyBalanceError] = useState('');
+
     const [activeRelationships, setActiveRelationships] = useState<TActiveCopy[]>([]);
     const [isStarting, setIsStarting] = useState(false);
     const [stoppingId, setStoppingId] = useState<string | null>(null);
@@ -78,6 +88,48 @@ const CopyTrading = observer(() => {
     useEffect(() => {
         setActiveRelationships(loadStoredRelationships());
     }, []);
+
+    // ==================== Auto-fetch balance when a token is pasted ====================
+
+    useEffect(() => {
+        const token = masterTokenInput.trim();
+        setMasterAccountInfo(null);
+        setMasterBalanceError('');
+        if (!token) return undefined;
+
+        setIsLoadingMasterBalance(true);
+        const handle = setTimeout(() => {
+            fetchAccountInfoForToken(token)
+                .then(info => setMasterAccountInfo(info))
+                .catch(error => setMasterBalanceError(error instanceof Error ? error.message : 'Could not verify this token.'))
+                .finally(() => setIsLoadingMasterBalance(false));
+        }, 600);
+
+        return () => {
+            clearTimeout(handle);
+            setIsLoadingMasterBalance(false);
+        };
+    }, [masterTokenInput]);
+
+    useEffect(() => {
+        const token = myApiToken.trim();
+        setMyAccountInfo(null);
+        setMyBalanceError('');
+        if (!token) return undefined;
+
+        setIsLoadingMyBalance(true);
+        const handle = setTimeout(() => {
+            fetchAccountInfoForToken(token)
+                .then(info => setMyAccountInfo(info))
+                .catch(error => setMyBalanceError(error instanceof Error ? error.message : 'Could not verify this token.'))
+                .finally(() => setIsLoadingMyBalance(false));
+        }, 600);
+
+        return () => {
+            clearTimeout(handle);
+            setIsLoadingMyBalance(false);
+        };
+    }, [myApiToken]);
 
     const currency = client?.currency || 'USD';
     const isLoggedIn = Boolean(client?.is_logged_in);
@@ -220,6 +272,30 @@ const CopyTrading = observer(() => {
                             onChange={event => setMasterTokenInput(event.target.value)}
                         />
                     </label>
+
+                    {isLoadingMasterBalance && <p className='copy-balance-loading'>Verifying token...</p>}
+                    {masterBalanceError && <p className='copy-balance-error'>{masterBalanceError}</p>}
+                    {masterAccountInfo && (
+                        <div className={`copy-balance-card ${masterAccountInfo.is_virtual ? 'copy-balance-card--demo' : ''}`}>
+                            <div>
+                                <span className='copy-balance-card__label'>
+                                    <Localize i18n_default_text='Account' />
+                                </span>
+                                <span className='copy-balance-card__value'>
+                                    {masterAccountInfo.loginid}
+                                    {masterAccountInfo.is_virtual ? ' (Demo)' : ' (Real)'}
+                                </span>
+                            </div>
+                            <div>
+                                <span className='copy-balance-card__label'>
+                                    <Localize i18n_default_text='Balance' />
+                                </span>
+                                <span className='copy-balance-card__value'>
+                                    {masterAccountInfo.balance.toFixed(2)} {masterAccountInfo.currency}
+                                </span>
+                            </div>
+                        </div>
+                    )}
 
                     <label className='copy-field'>
                         <span>
@@ -384,6 +460,34 @@ const CopyTrading = observer(() => {
                             onChange={event => setMyApiToken(event.target.value)}
                         />
                     </label>
+                    {isLoadingMyBalance && <p className='copy-balance-loading'>Verifying token...</p>}
+                    {myBalanceError && <p className='copy-balance-error'>{myBalanceError}</p>}
+                    {myAccountInfo && (
+                        <div className={`copy-balance-card ${myAccountInfo.is_virtual ? 'copy-balance-card--demo' : ''}`}>
+                            <div>
+                                <span className='copy-balance-card__label'>
+                                    <Localize i18n_default_text='Account' />
+                                </span>
+                                <span className='copy-balance-card__value'>
+                                    {myAccountInfo.loginid}
+                                    {myAccountInfo.is_virtual ? ' (Demo)' : ' (Real)'}
+                                </span>
+                            </div>
+                            <div>
+                                <span className='copy-balance-card__label'>
+                                    <Localize i18n_default_text='Balance' />
+                                </span>
+                                <span className='copy-balance-card__value'>
+                                    {myAccountInfo.balance.toFixed(2)} {myAccountInfo.currency}
+                                </span>
+                            </div>
+                        </div>
+                    )}
+                    {myAccountInfo?.is_virtual && (
+                        <p className='copy-warning'>
+                            <Localize i18n_default_text='This is a demo account \u2014 Allow Copiers only works on real-money accounts.' />
+                        </p>
+                    )}
                     <p className='copy-hint'>
                         <Localize i18n_default_text='This token is only stored in your browser for your own reference \u2014 it is never sent anywhere by this page except when you personally copy it to share.' />
                     </p>
