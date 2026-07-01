@@ -4,6 +4,7 @@ import { createBrowserRouter, createRoutesFromElements, Navigate, Route, RouterP
 import ChunkLoader from '@/components/loader/chunk-loader';
 import LocalStorageSyncWrapper from '@/components/localStorage-sync-wrapper';
 import RoutePromptDialog from '@/components/route-prompt-dialog';
+import AIAssistant from '@/components/ai-assistant/AIAssistant';
 import { useAccountSwitching } from '@/hooks/useAccountSwitching';
 import { useLanguageFromURL } from '@/hooks/useLanguageFromURL';
 import { useOAuthCallback } from '@/hooks/useOAuthCallback';
@@ -43,6 +44,7 @@ const router = createBrowserRouter(
                             <StoreProvider>
                                 <LocalStorageSyncWrapper>
                                     <RoutePromptDialog />
+                                    <AIAssistant />
                                     <CoreStoreProvider>
                                         <Layout />
                                     </CoreStoreProvider>
