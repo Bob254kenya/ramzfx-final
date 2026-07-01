@@ -835,8 +835,10 @@ const ProScanner = observer(() => {
                 setSessionPnl(total);
                 setCompletedRuns(completedRunsRef.current);
             } catch (error) {
-                pushLog('error', error instanceof Error ? error.message : 'Trade failed.');
-                break;
+                pushLog('error', `${error instanceof Error ? error.message : 'Trade failed.'} Retrying…`);
+                tradeInFlightRef.current = false;
+                await sleep(SCAN_RETRY_DELAY_MS);
+                continue;
             } finally {
                 tradeInFlightRef.current = false;
             }
