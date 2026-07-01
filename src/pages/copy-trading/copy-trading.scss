@@ -333,6 +333,131 @@
     color: #6b7280;
 }
 
+.copy-followers-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.copy-followers-count {
+    flex: 0 0 auto;
+    background: linear-gradient(135deg, #c8a45d, #e0b96c);
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 6px 12px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.copy-followers-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: #f9fafb;
+    border-radius: 14px;
+    padding: 16px;
+}
+
+.copy-followers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.copy-follower {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    background: #f9fafb;
+    border-radius: 14px;
+    padding: 12px 16px;
+}
+
+.copy-follower__info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 140px;
+}
+
+.copy-follower__label {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1a1f29;
+}
+
+.copy-follower__token {
+    font-size: 12px;
+    color: #9aa1ad;
+    font-family: monospace;
+}
+
+.copy-follower__balance {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.copy-follower__badge {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 4px 10px;
+    border-radius: 999px;
+}
+
+.copy-follower__badge--real {
+    background: #eafaf1;
+    color: #1f9d5a;
+    border: 1px solid rgba(40, 199, 111, 0.35);
+}
+
+.copy-follower__badge--demo {
+    background: #fff8ec;
+    color: #b3852f;
+    border: 1px solid rgba(200, 164, 93, 0.35);
+}
+
+.copy-follower__amount {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1a1f29;
+}
+
+.copy-follower__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.copy-icon-button {
+    border: 1px solid #e2e5ea;
+    background: #ffffff;
+    color: #6b7280;
+    border-radius: 10px;
+    width: 34px;
+    height: 34px;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &:hover:not(:disabled) {
+        color: #c8a45d;
+        border-color: #c8a45d;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
 .copy-status {
     max-width: 980px;
     width: 100%;
